@@ -45,16 +45,20 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_next_content",
-            "description": "根据当前完成的小目标ID，获取下一阶段的学习内容（下一小目标、下一节或下一章）。",
+            "description": "获取学生下一阶段的学习内容。如果只提供student_id，会自动查找最新进度并推荐。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "current_subsection_id": {
                         "type": "integer",
-                        "description": "当前刚完成或正在进行的小目标ID"
+                        "description": "当前刚完成的小目标ID (可选)"
+                    },
+                    "student_id": {
+                        "type": "integer",
+                        "description": "学生ID (推荐使用)"
                     }
                 },
-                "required": ["current_subsection_id"]
+                "required": []
             }
         }
     },
@@ -72,6 +76,39 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": ["student_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_interactive_quiz",
+            "description": "Generate interactive quiz based on user topic/prompt. Use this when user explicitly asks to generate a quiz or is in Quiz Mode.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "User's topic or prompt for the quiz."
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of questions to generate (default: 3)."
+                    },
+                    "quiz_type": {
+                        "type": "string",
+                        "description": "Type of quiz (mixed, choice, blank, etc.) (default: mixed)."
+                    },
+                    "difficulty": {
+                        "type": "string",
+                        "description": "Difficulty level (easy, intermediate, hard) (default: intermediate)."
+                    },
+                    "student_id": {
+                        "type": "integer",
+                        "description": "Student ID."
+                    }
+                },
+                "required": ["topic"]
             }
         }
     }

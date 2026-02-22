@@ -40,7 +40,10 @@ def chat(
     retrieved_docs = []
     source_info = []  # 新增：存储文档来源信息
 
-    if request.use_rag and request.message:
+    if request.mode == "quiz":
+        # 如果是出题模式，添加系统指令
+        request.message = f"(系统指令: 用户正在出题模式下，请调用 generate_interactive_quiz 工具生成题目，并以 标签返回结果) 用户的出题提示词: {request.message}"
+    elif request.use_rag and request.message:
         # 使用RAG检索相关内容（不限制章节，搜索所有文档）
         results = rag_service.search(
             query=request.message,

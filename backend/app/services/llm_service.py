@@ -183,11 +183,13 @@ class LLMService:
                 messages.append(response_message)
                 
                 # 可用工具映射
+                from app.tools.quiz_tools import generate_interactive_quiz
                 available_functions = {
                     "get_wrong_questions_by_subsection": get_wrong_questions_by_subsection,
                     "get_student_learning_progress": get_student_learning_progress,
                     "get_next_content": get_next_content,
                     "get_student_weak_points": get_student_weak_points,
+                    "generate_interactive_quiz": generate_interactive_quiz,
                 }
                 
                 # 执行每个工具调用
@@ -204,8 +206,7 @@ class LLMService:
                     if student_id is not None and "student_id" not in function_args:
                         # 检查函数是否接受 student_id 参数（这里简单通过名称判断，因为所有工具都定义了 student_id）
                         # 更严谨的做法是检查函数签名，但这里我们的工具都统一了
-                        if function_name != "get_next_content": # get_next_content 不需要 student_id
-                             function_args["student_id"] = student_id
+                        function_args["student_id"] = student_id
                     
                     if function_to_call:
                         logger.info(f"Executing tool: {function_name} with args: {function_args}")

@@ -82,17 +82,46 @@ def get_student_learning_progress(db: Session, student_id: int) -> Dict[str, Any
         "last_quiz_time": last_record.created_at.isoformat()
     }
 
-def get_next_content(db: Session, current_subsection_id: int) -> Dict[str, Any]:
+def get_next_content(db: Session, current_subsection_id: Optional[int] = None, student_id: Optional[int] = None) -> Dict[str, Any]:
     """
     获取下一阶段的学习内容
     
     Args:
         db: 数据库会话
-        current_subsection_id: 当前完成的小目标ID
+        current_subsection_id: 当前完成的小目标ID (可选)
+        student_id: 学生ID (可选，如果提供则自动查找最新进度)
         
     Returns:
         下一章节/小节内容信息
     """
+    if student_id and not current_subsection_id:
+        # 查找学生最新的进度
+        last_record = db.query(QuizRecord).filter(
+            QuizRecord.student_id == student_id
+        ).order_by(desc(QuizRecord.created_at)).first()
+        
+        if last_record and last_record.subsection_id:
+            current_subsection_id = last_record.subsection_id
+        else:
+            # 如果没有记录，返回第一章第一节
+            first_chapter = db.query(Chapter).order_by(Chapter.chapter_number).first()
+            if first_chapter:
+                first_section = db.query(Section).filter(Section.chapter_id == first_chapter.id).order_by(Section.order).first()
+                if first_section:
+                    first_sub = db.query(SubSection).filter(SubSection.section_id == first_section.id).order_by(SubSection.id).first()
+                    if first_sub:
+                         return {
+                            "type": "subsection",
+                            "title": first_sub.title,
+                            "description": "Start your learning journey here.",
+                            "id": first_sub.id,
+                            "chapter_title": first_chapter.title
+                        }
+            return {"message": "No content available or history found."}
+
+    if not current_subsection_id:
+        return {"error": "Either current_subsection_id or student_id must be provided"}
+
     current_sub = db.query(SubSection).filter(SubSection.id == current_subsection_id).first()
     if not current_sub:
         return {"error": "Invalid subsection ID"}

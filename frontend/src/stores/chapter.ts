@@ -1,8 +1,8 @@
+import * as chapterApi from '@/api/chapters'
+import type { Chapter } from '@/types'
+import { ElMessage } from 'element-plus'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Chapter } from '@/types'
-import * as chapterApi from '@/api/chapters'
-import { ElMessage } from 'element-plus'
 
 export const useChapterStore = defineStore('chapter', () => {
   const chapters = ref<Chapter[]>([])
@@ -14,6 +14,7 @@ export const useChapterStore = defineStore('chapter', () => {
     try {
       const res: any = await chapterApi.getChapters()
       chapters.value = res
+      return res
     } catch (error) {
       console.error('Fetch chapters error:', error)
       ElMessage.error('获取章节列表失败')

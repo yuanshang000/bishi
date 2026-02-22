@@ -1,8 +1,8 @@
 <template>
   <div class="chat-container">
     <el-container class="chat-layout">
-      <!-- 左侧会话列表 -->
-      <el-aside width="280px" class="session-sidebar">
+      <!-- 左侧会话列表 (仅在聊天模式下显示) -->
+      <el-aside v-if="mode === 'chat'" width="280px" class="session-sidebar">
         <div class="sidebar-header">
           <h3>会话记录</h3>
           <el-button type="primary" size="small" @click="handleNewSession">
@@ -45,14 +45,20 @@
         <el-card class="chat-card">
           <template #header>
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span>智能问答</span>
-              <el-tag v-if="currentSessionMessageCount > 0" type="info">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span>智能问答</span>
+                <el-radio-group v-model="mode" size="small">
+                  <el-radio-button label="chat">聊天模式</el-radio-button>
+                  <el-radio-button label="quiz">出题模式</el-radio-button>
+                </el-radio-group>
+              </div>
+              <el-tag v-if="mode === 'chat' && currentSessionMessageCount > 0" type="info">
                 当前会话：{{ currentSessionMessageCount }} 条消息
               </el-tag>
             </div>
           </template>
 
-          <div class="chat-messages" ref="messagesRef">
+          <div v-if="mode === 'chat'" class="chat-messages" ref="messagesRef">
             <div v-for="msg in messages" :key="msg.id" :class="['message', msg.role]">
               <div class="message-content">
                 <div class="message-header">
@@ -79,7 +85,32 @@
             </div>
           </div>
 
-          <div class="chat-input">
+          <!-- 出题模式主区域 -->
+          <div v-else class="quiz-main-container">
+            <div class="quiz-hero">
+              <h2>智能出题助手</h2>
+              <p class="quiz-subtitle">输入您的要求，AI将为您生成个性化练习题</p>
+              
+              <div class="quiz-form">
+                <el-input
+                  v-model="quizPrompt"
+                  placeholder="请输入出题提示词（例如：帮我出一套关于商务英语邮件写作的题目，包含选择题和填空题，难度中等）"
+                  :rows="6"
+                  type="textarea"
+                  class="quiz-prompt-input-large"
+                />
+                
+                <div class="quiz-actions-large">
+                  <el-button type="primary" size="large" @click="handleGenerateQuiz" :loading="loading" :disabled="!quizPrompt.trim()">
+                    <el-icon class="el-icon--left"><Loading v-if="loading" /><Picture v-else /></el-icon>
+                    生成题目
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="mode === 'chat'" class="chat-input">
             <!-- 图片预览区域 -->
             <div v-if="selectedImage" class="image-preview-container">
               <div class="image-preview-box">
@@ -96,6 +127,35 @@
               </div>
             </div>
 
+            <!-- Chapter Selector Popover -->
+            <div v-if="showChapterSelector" class="chapter-selector-popover">
+              <div class="chapter-selector-header">
+                <span>请选择章节上下文</span>
+                <el-button size="small" circle @click="showChapterSelector = false"><el-icon><Close /></el-icon></el-button>
+              </div>
+              
+              <div class="chapter-list-container" v-if="chapterStore.chapters && chapterStore.chapters.length > 0">
+                 <el-tree
+                    :data="chapterTreeData"
+                    :props="defaultProps"
+                    @node-click="handleNodeClick"
+                    class="chapter-tree"
+                    highlight-current
+                    :expand-on-click-node="false"
+                 >
+                    <template #default="{ node, data }">
+                        <span class="custom-tree-node">
+                           <span>{{ node.label }}</span>
+                           <span v-if="data.type" class="node-type-tag">{{ data.type_label }}</span>
+                        </span>
+                    </template>
+                 </el-tree>
+              </div>
+              <div v-else class="no-chapter-data">
+                暂无章节数据
+              </div>
+            </div>
+
             <div class="input-row">
               <el-upload
                 :show-file-list="false"
@@ -108,7 +168,7 @@
 
               <el-input
                 v-model="inputMessage"
-                placeholder="请输入您的问题...（支持 Ctrl+V 粘贴图片）"
+                placeholder="请输入您的问题...（支持 Ctrl+V 粘贴图片，输入 # 选择章节）"
                 :rows="3"
                 type="textarea"
                 @keyup.ctrl.enter="handleSend"
@@ -124,20 +184,147 @@
         </el-card>
       </el-main>
     </el-container>
+
+    <!-- Quiz Modal -->
+    <el-dialog
+      v-model="showQuizModal"
+      title="智能生成题目"
+      width="700px"
+      :close-on-click-modal="false"
+      destroy-on-close
+      @close="resetQuiz"
+    >
+      <div v-if="quizData" class="quiz-modal-content">
+        <div v-for="(q, index) in quizData.questions" :key="index" class="quiz-item">
+          <div class="quiz-question-header">
+            <span class="question-index">题目 {{ index + 1 }}</span>
+            <el-tag size="small">{{ q.quiz_type }}</el-tag>
+          </div>
+          <div class="quiz-question-text">{{ q.question }}</div>
+          
+          <!-- Choice -->
+          <div v-if="q.quiz_type === 'choice' || q.quiz_type === 'mixed' && q.options" class="quiz-options">
+            <el-radio-group v-model="userAnswers[index]" :disabled="isSubmitted">
+              <el-radio v-for="(val, key) in q.options" :key="key" :label="key" class="quiz-option-item">
+                <span class="option-key">{{ key }}.</span> {{ val }}
+              </el-radio>
+            </el-radio-group>
+          </div>
+          
+          <!-- Blank / Translation / Writing -->
+          <div v-else class="quiz-text-input">
+            <el-input 
+              v-model="userAnswers[index]" 
+              type="textarea" 
+              :rows="2" 
+              placeholder="请输入答案" 
+              :disabled="isSubmitted"
+            />
+          </div>
+
+          <!-- Result -->
+          <div v-if="isSubmitted" class="quiz-result-box">
+            <div class="result-header">
+              <span class="label">参考答案：</span>
+              <span class="value">{{ q.correct_answer }}</span>
+            </div>
+            <div class="result-explanation">
+              <span class="label">解析：</span>
+              <span class="value">{{ q.explanation }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="showQuizModal = false">关闭</el-button>
+          <el-button type="primary" @click="submitQuiz" v-if="!isSubmitted">
+            提交答案
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick, computed } from 'vue'
+import { deleteChatSession, getChatHistory, getChatSessions, sendChatMessage } from '@/api'
 import { useChapterStore } from '@/stores'
-import { sendChatMessage, getChatHistory, getChatSessions, deleteChatSession } from '@/api'
+import { Close, Delete, Loading, Picture, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Loading, Picture, Close } from '@element-plus/icons-vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 const chapterStore = useChapterStore()
 const messages = ref<any[]>([])
 const inputMessage = ref('')
 const loading = ref(false)
+const mode = ref('chat') // 'chat' or 'quiz'
+const quizPrompt = ref('')
+const quizData = ref<any>(null)
+const userAnswers = ref<any>({})
+const isSubmitted = ref(false)
+const showQuizModal = ref(false)
+const showChapterSelector = ref(false)
+
+const chapterTreeData = computed(() => {
+  if (!chapterStore.chapters || !Array.isArray(chapterStore.chapters)) {
+      return []
+  }
+  return chapterStore.chapters.map((c: any) => ({
+    label: `第${c.chapter_number}章 ${c.title}`,
+    value: `Chapter ${c.chapter_number} ${c.title}`,
+    type: 'chapter',
+    type_label: '章',
+    children: c.sections?.map((s: any) => ({
+      label: `第${s.order}节 ${s.title}`,
+      value: `Section ${s.order} ${s.title}`,
+      type: 'section',
+      type_label: '节',
+      children: s.subsections?.map((sub: any) => ({
+         label: `${sub.order} ${sub.title}`,
+         value: `Subsection ${sub.order} ${sub.title}`,
+         type: 'subsection',
+         type_label: '小节'
+      }))
+    }))
+  }))
+})
+
+const defaultProps = {
+  children: 'children',
+  label: 'label',
+}
+
+watch(inputMessage, async (newVal) => {
+  if (newVal.endsWith('#') || newVal.endsWith('＃')) {
+    // Ensure chapters are loaded
+    if (!chapterStore.chapters || chapterStore.chapters.length === 0) {
+        // Force reload without await to ensure UI updates
+        chapterStore.fetchChapters()
+    }
+    showChapterSelector.value = true
+  } else if (!newVal.includes('#') && !newVal.includes('＃')) {
+    // Optional: close if # is removed? maybe not strictly necessary
+    showChapterSelector.value = false
+  }
+})
+
+const handleNodeClick = (data: any) => {
+  // Replace the trailing # with the selected text formatted as a tag/context
+  inputMessage.value = inputMessage.value.replace(/([#＃])$/, `【参考：${data.value}】 `)
+  showChapterSelector.value = false
+}
+
+const resetQuiz = () => {
+  quizData.value = null
+  userAnswers.value = {}
+  isSubmitted.value = false
+}
+
+const submitQuiz = () => {
+  isSubmitted.value = true
+  ElMessage.success('答案已提交，请查看解析')
+}
 const sessionId = ref('')
 const messagesRef = ref<HTMLElement>()
 const sessions = ref<any[]>([])
@@ -235,6 +422,12 @@ const handleDeleteSession = async (sessionIdToDelete: string) => {
   }
 }
 
+const handleGenerateQuiz = () => {
+  if (!quizPrompt.value.trim()) return
+  inputMessage.value = quizPrompt.value
+  handleSend()
+}
+
 const handleSend = async () => {
   if (!inputMessage.value.trim()) return
 
@@ -258,7 +451,8 @@ const handleSend = async () => {
     const requestData: any = {
       message: userMessage,
       session_id: sessionId.value,
-      use_rag: true
+      use_rag: true,
+      mode: mode.value
     }
 
     // 如果有图片，添加到请求中（只发送base64部分，不包含data:image前缀）
@@ -269,6 +463,36 @@ const handleSend = async () => {
     }
 
     const res: any = await sendChatMessage(requestData)
+
+    if (mode.value === 'quiz') {
+      try {
+        let quizJson = null
+        // Try direct parse
+        try {
+          const parsed = JSON.parse(res.assistant_message)
+          if (parsed.generate_interactive_quiz_response) {
+            quizJson = parsed.generate_interactive_quiz_response
+          }
+        } catch (e) {}
+        
+        // Try regex if direct parse failed
+        if (!quizJson) {
+          const match = res.assistant_message.match(/\{[\s\S]*"generate_interactive_quiz_response"[\s\S]*\}/)
+          if (match) {
+             const parsed = JSON.parse(match[0])
+             quizJson = parsed.generate_interactive_quiz_response
+          }
+        }
+        
+        if (quizJson) {
+           quizData.value = quizJson
+           showQuizModal.value = true
+           ElMessage.success('题目生成成功！')
+        }
+      } catch (e) {
+        console.error("Quiz parsing error", e)
+      }
+    }
 
     messages.value.push({
       id: res.id,
@@ -609,6 +833,7 @@ const handlePaste = (event: ClipboardEvent) => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  position: relative;
 }
 
 .image-preview-container {
@@ -655,5 +880,192 @@ const handlePaste = (event: ClipboardEvent) => {
 
 .chat-input :deep(.el-textarea) {
   flex: 1;
+}
+
+.chapter-selector-popover {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin: 0;
+  background: white;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px 8px 8px 0;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 2000;
+  height: 250px;
+  display: flex;
+  flex-direction: column;
+  width: 400px; /* 固定宽度，不要铺满 */
+}
+
+.chapter-selector-header {
+  padding: 10px;
+  border-bottom: 1px solid #ebeef5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+  color: #606266;
+  background: #f5f7fa;
+  border-radius: 8px 8px 0 0;
+}
+
+.chapter-list-container {
+  overflow-y: auto;
+  flex: 1;
+  padding: 10px;
+}
+
+.custom-tree-node {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  padding-right: 8px;
+}
+
+.node-type-tag {
+  font-size: 12px;
+  color: #909399;
+  background-color: #f4f4f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.quiz-main-container {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #f5f7fa;
+  padding: 40px;
+}
+
+.quiz-hero {
+  text-align: center;
+  max-width: 800px;
+  width: 100%;
+}
+
+.quiz-hero h2 {
+  font-size: 32px;
+  color: #303133;
+  margin-bottom: 10px;
+}
+
+.quiz-subtitle {
+  font-size: 16px;
+  color: #909399;
+  margin-bottom: 40px;
+}
+
+.quiz-form {
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.quiz-prompt-input-large :deep(.el-textarea__inner) {
+  font-size: 16px;
+  padding: 15px;
+  border-radius: 8px;
+}
+
+.quiz-actions-large {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.quiz-actions-large .el-button {
+  padding: 12px 40px;
+  font-size: 16px;
+}
+
+.quiz-modal-content {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.quiz-item {
+  margin-bottom: 25px;
+  padding: 15px;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #ebeef5;
+}
+
+.quiz-question-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.question-index {
+  font-weight: bold;
+  font-size: 16px;
+  color: #303133;
+}
+
+.quiz-question-text {
+  font-size: 15px;
+  margin-bottom: 15px;
+  line-height: 1.6;
+}
+
+.quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quiz-option-item {
+  margin-left: 0 !important;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.quiz-option-item:hover {
+  background: #f0f2f5;
+}
+
+.option-key {
+  font-weight: bold;
+  margin-right: 5px;
+}
+
+.quiz-text-input {
+  margin-top: 10px;
+}
+
+.quiz-result-box {
+  margin-top: 15px;
+  padding: 15px;
+  background: #f0f9eb;
+  border-radius: 4px;
+  border-left: 4px solid #67c23a;
+}
+
+.result-header, .result-explanation {
+  margin-bottom: 8px;
+}
+
+.result-explanation {
+  margin-bottom: 0;
+}
+
+.label {
+  font-weight: bold;
+  color: #606266;
+}
+
+.value {
+  color: #303133;
 }
 </style>
