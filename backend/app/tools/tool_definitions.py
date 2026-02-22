@@ -2,6 +2,52 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "get_student_quiz_history",
+            "description": "获取学生最近的测验历史记录，包括分数、涉及的章节等信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "student_id": {
+                        "type": "integer",
+                        "description": "学生的用户ID"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回记录数量限制，默认为5"
+                    }
+                },
+                "required": ["student_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_course_content",
+            "description": "从课程内容的向量数据库中检索相关知识。可以根据关键词或指定章节进行搜索。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词或问题描述"
+                    },
+                    "chapter_id": {
+                        "type": "integer",
+                        "description": "指定章节ID进行过滤（可选）"
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "返回结果数量（可选，默认3）"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_wrong_questions_by_subsection",
             "description": "获取指定小目标（subsection）的错题记录，用于分析痛点和针对性出题。",
             "parameters": {

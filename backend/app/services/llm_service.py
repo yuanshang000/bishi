@@ -19,7 +19,9 @@ from app.tools import (
     get_wrong_questions_by_subsection,
     get_student_learning_progress,
     get_next_content,
-    get_student_weak_points
+    get_student_weak_points,
+    get_student_quiz_history,
+    search_course_content
 )
 
 logger = logging.getLogger(__name__)
@@ -190,6 +192,8 @@ class LLMService:
                     "get_next_content": get_next_content,
                     "get_student_weak_points": get_student_weak_points,
                     "generate_interactive_quiz": generate_interactive_quiz,
+                    "get_student_quiz_history": get_student_quiz_history,
+                    "search_course_content": search_course_content,
                 }
                 
                 # 执行每个工具调用
@@ -291,15 +295,25 @@ class LLMService:
    - `get_student_weak_points`: 获取学生的薄弱点。
    - `get_wrong_questions_by_subsection`: 获取学生的错题。
    - `get_next_content`: 获取下一章/节的学习内容。
+   - `get_student_quiz_history`: 获取学生最近的做题记录（测验历史）。
+   - `search_course_content`: 当学生询问特定知识点或课程内容时，搜索相关课程资料。
 
 **重要指令：**
-- **主动性**：如果学生问“我学到哪了？”或“接下来该学什么？”，**必须**调用工具获取真实数据，不要瞎编。
+- **个人数据优先**：如果用户询问个人情况（如“我需要加强什么”、“我学到哪了”、“我的做题记录”），**必须忽略**参考文档中的通用内容，**必须调用**相应的工具（`get_student_weak_points`, `get_student_learning_progress`, `get_student_quiz_history`）来获取实时数据。
+- **主动性**：不要说“我无法查询”，你有工具权限。直接调用工具！如果工具调用返回结果为空，请如实告知用户“暂时没有相关记录”。
 - **数据驱动**：如果学生问“我需要加强什么？”，**必须**调用 `get_student_weak_points` 分析。
+- **做题记录**：如果学生问“我最近做得怎么样？”或“查看做题记录”，请调用 `get_student_quiz_history`。
+- **知识检索**：如果学生问具体的英语知识点（如“什么是虚拟语气？”）或者询问“下一节课的具体内容是什么”，请优先调用 `search_course_content` 获取准确的课程内容，而不是仅凭训练数据回答。
 - **上下文优先**：如果提供了文档上下文，请优先基于上下文回答。
 - **当前用户**："""
 
         if student_id:
             system_prompt += f"当前交互的学生ID是 {student_id}。"
+
+        # 关键词检测，增强 Prompt，强制引导 LLM 使用工具
+        keywords_personal = ["加强", "弱点", "薄弱", "做题情况", "做题记录", "学到哪", "进度", "下一章", "历史"]
+        if any(k in question for k in keywords_personal):
+            system_prompt += "\n\n**特别提醒：** 用户正在询问个人学习数据。请务必调用工具（如 get_student_weak_points, get_student_quiz_history, get_student_learning_progress）获取真实数据。忽略任何无关的文档上下文。"
 
         if context:
             system_prompt += f"\n\n**参考文档内容：**\n{context}"
