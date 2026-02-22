@@ -142,6 +142,7 @@
                     class="chapter-tree"
                     highlight-current
                     :expand-on-click-node="false"
+                    default-expand-all
                  >
                     <template #default="{ node, data }">
                         <span class="custom-tree-node">
@@ -266,23 +267,28 @@ const isSubmitted = ref(false)
 const showQuizModal = ref(false)
 const showChapterSelector = ref(false)
 
+const selectedContext = ref<{type: string, id: number, label: string} | null>(null)
+
 const chapterTreeData = computed(() => {
   if (!chapterStore.chapters || !Array.isArray(chapterStore.chapters)) {
       return []
   }
   return chapterStore.chapters.map((c: any) => ({
-    label: `第${c.chapter_number}章 ${c.title}`,
-    value: `Chapter ${c.chapter_number} ${c.title}`,
+    label: c.title,
+    value: c.title,
+    id: c.id,
     type: 'chapter',
     type_label: '章',
     children: c.sections?.map((s: any) => ({
-      label: `第${s.order}节 ${s.title}`,
-      value: `Section ${s.order} ${s.title}`,
+      label: s.title,
+      value: s.title,
+      id: s.id,
       type: 'section',
       type_label: '节',
       children: s.subsections?.map((sub: any) => ({
-         label: `${sub.order} ${sub.title}`,
-         value: `Subsection ${sub.order} ${sub.title}`,
+         label: sub.title,
+         value: sub.title,
+         id: sub.id,
          type: 'subsection',
          type_label: '小节'
       }))
@@ -307,12 +313,24 @@ watch(inputMessage, async (newVal) => {
     // Optional: close if # is removed? maybe not strictly necessary
     showChapterSelector.value = false
   }
+  
+  // 如果删除了引用标记，清空上下文
+  if (selectedContext.value && !newVal.includes(`【参考：${selectedContext.value.label}】`)) {
+      selectedContext.value = null
+  }
 })
 
 const handleNodeClick = (data: any) => {
   // Replace the trailing # with the selected text formatted as a tag/context
   inputMessage.value = inputMessage.value.replace(/([#＃])$/, `【参考：${data.value}】 `)
   showChapterSelector.value = false
+  
+  // 保存上下文信息
+  selectedContext.value = {
+      type: data.type,
+      id: data.id,
+      label: data.value
+  }
 }
 
 const resetQuiz = () => {
@@ -453,6 +471,12 @@ const handleSend = async () => {
       session_id: sessionId.value,
       use_rag: true,
       mode: mode.value
+    }
+    
+    // 如果有选中的上下文，添加到请求中
+    if (selectedContext.value && userMessage.includes(`【参考：${selectedContext.value.label}】`)) {
+        requestData.context_type = selectedContext.value.type
+        requestData.context_id = selectedContext.value.id
     }
 
     // 如果有图片，添加到请求中（只发送base64部分，不包含data:image前缀）

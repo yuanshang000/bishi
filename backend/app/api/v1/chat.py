@@ -40,29 +40,50 @@ def chat(
     retrieved_docs = []
     source_info = []  # 新增：存储文档来源信息
 
+    # 优先处理指定的上下文 (无论何种模式)
+    if request.context_type == "subsection" and request.context_id:
+        from app.tools.data_tools import _get_subsection_content_summary
+        # 获取小节内容的详细摘要（包含 DB 文本、KnowledgePoint 和 RAG 检索）
+        content_summary = _get_subsection_content_summary(db, request.context_id)
+        if content_summary:
+            context = content_summary
+            retrieved_docs = [{"content": content_summary, "metadata": {"title": "Specified Subsection Context", "doc_type": "subsection"}}]
+            source_info.append({
+                'chapter_id': request.chapter_id,
+                'title': f"Subsection {request.context_id}",
+                'doc_type': 'subsection'
+            })
+
     if request.mode == "quiz":
         # 如果是出题模式，添加系统指令
-        request.message = f"(系统指令: 用户正在出题模式下，请调用 generate_interactive_quiz 工具生成题目，并以 标签返回结果) 用户的出题提示词: {request.message}"
+        # 即使是出题模式，如果获取到了 context，也应该包含在内
+        base_instruction = "(系统指令: 用户正在出题模式下，请调用 generate_interactive_quiz 工具生成题目，并以 标签返回结果)"
+        if context:
+            request.message = f"{base_instruction} 请基于以下提供的上下文内容进行出题：\n\n{context}\n\n用户的出题提示词: {request.message}"
+        else:
+            request.message = f"{base_instruction} 用户的出题提示词: {request.message}"
     elif request.use_rag and request.message:
-        # 使用RAG检索相关内容（不限制章节，搜索所有文档）
-        results = rag_service.search(
-            query=request.message,
-            chapter_id=None,  # 不限制章节
-            top_k=5  # 增加检索数量
-        )
+        # 如果没有指定上下文或未找到内容，则进行通用 RAG 检索
+        if not context:
+            # 使用RAG检索相关内容（不限制章节，搜索所有文档）
+            results = rag_service.search(
+                query=request.message,
+                chapter_id=None,  # 不限制章节
+                top_k=5  # 增加检索数量
+            )
 
-        if results:
-            context = "\n\n---\n\n".join([r['content'] for r in results])
-            retrieved_docs = results
+            if results:
+                context = "\n\n---\n\n".join([r['content'] for r in results])
+                retrieved_docs = results
 
-            # 提取文档来源信息
-            for r in results:
-                metadata = r.get('metadata', {})
-                source_info.append({
-                    'chapter_id': metadata.get('chapter_id'),
-                    'title': metadata.get('title'),
-                    'doc_type': metadata.get('doc_type')
-                })
+                # 提取文档来源信息
+                for r in results:
+                    metadata = r.get('metadata', {})
+                    source_info.append({
+                        'chapter_id': metadata.get('chapter_id'),
+                        'title': metadata.get('title'),
+                        'doc_type': metadata.get('doc_type')
+                    })
 
     # 获取聊天历史
     chat_history_records = db.query(ChatHistory).filter(

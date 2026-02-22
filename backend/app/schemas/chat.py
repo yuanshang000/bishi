@@ -27,6 +27,8 @@ class ChatRequest(BaseModel):
     use_rag: bool = Field(True, description="是否使用RAG检索")
     image: Optional[str] = Field(None, description="图片base64数据（可选）")
     mode: Optional[str] = Field("chat", description="模式 (chat/quiz)")
+    context_type: Optional[str] = Field(None, description="上下文类型 (chapter/section/subsection)")
+    context_id: Optional[int] = Field(None, description="上下文ID")
 
 
 class ChatCreate(ChatBase):
