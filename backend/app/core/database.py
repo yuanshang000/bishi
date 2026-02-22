@@ -34,6 +34,20 @@ SessionLocal = sessionmaker(
 # 创建基类
 Base = declarative_base()
 
+# Import models to ensure they are registered with Base
+# This is important for Alembic to detect changes
+# from app.models.user import User
+# from app.models.chapter import Chapter
+# from app.models.section import Section
+# from app.models.subsection import SubSection
+# from app.models.knowledge_point import KnowledgePoint
+# from app.models.document import Document
+# from app.models.chat import ChatHistory
+# from app.models.user_word_stats import UserWordStats
+# from app.models.quiz import QuizRecord
+# from app.models.wrong_question import WrongQuestion
+# from app.models.custom_quiz import CustomQuizRecord  # Ensure CustomQuizRecord is imported
+
 
 def get_db() -> Generator[Session, None, None]:
     """

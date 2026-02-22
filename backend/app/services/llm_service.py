@@ -221,6 +221,12 @@ class LLMService:
                                 **function_args
                             )
                             
+                            # 特殊处理：如果是生成题目，直接返回工具的JSON结果，跳过第二次LLM调用
+                            # 这样可以避免LLM将JSON重写为XML或添加Markdown格式
+                            if function_name == "generate_interactive_quiz":
+                                logger.info("Quiz generated, returning JSON directly to frontend.")
+                                return json.dumps(function_response, ensure_ascii=False)
+                            
                             messages.append(
                                 {
                                     "tool_call_id": tool_call.id,
@@ -315,7 +321,18 @@ class LLMService:
         if any(k in question for k in keywords_personal):
             system_prompt += "\n\n**特别提醒：** 用户正在询问个人学习数据。请务必调用工具（如 get_student_weak_points, get_student_quiz_history, get_student_learning_progress）获取真实数据。忽略任何无关的文档上下文。"
 
+        # 强制出题模式下直接返回JSON
+        system_prompt += """
+\n**关键规则 - 出题模式 (Quiz Mode)：**
+如果用户请求生成题目（即调用了 `generate_interactive_quiz` 工具），该工具会返回一个包含 `generate_interactive_quiz_response` 的 JSON 对象。
+**你必须原样返回这个 JSON 对象。**
+- 不要添加 markdown 格式（如 ```json ... ```）。
+- 不要添加任何解释性文字（如 "好的，这是为您生成的题目..."）。
+- 直接输出 JSON 字符串即可。
+"""
+
         if context:
+
             system_prompt += f"\n\n**参考文档内容：**\n{context}"
             
         messages = [{"role": "system", "content": system_prompt}]
@@ -399,6 +416,241 @@ class LLMService:
             # Fallback: return empty classification or put all in 'reading' as default?
             # Better to return empty and let frontend handle or try keyword matching as fallback
             return {}
+
+    def generate_custom_quiz(
+        self,
+        context: str,
+        quiz_type: str,
+        count: int = 5,
+        difficulty: str = "intermediate",
+        target_knowledge_points: Optional[List[Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        生成自定义练习题目（智能问答模式，独立逻辑）
+        """
+        logger.info(f"Starting to generate {count} {quiz_type} questions (custom mode)")
+        
+        # 尝试生成题目，带有重试机制
+        try:
+            # 使用专门的自定义出题逻辑
+            questions = self._generate_custom_quiz_batch(
+                context=context,
+                quiz_type=quiz_type,
+                count=count,
+                difficulty=difficulty
+            )
+            
+            # 验证和收集有效题目
+            if not isinstance(questions, list):
+                logger.warning(f"Expected list from _generate_custom_quiz_batch, got {type(questions)}")
+                questions = []
+                
+            # 确保返回的题目符合前端要求
+            valid_questions = []
+            for q in questions:
+                # 规范化题目类型
+                q_type = q.get('quiz_type', quiz_type)
+                # 映射到前端支持的类型: choice, blank, translation, writing
+                if q_type == 'listening':
+                    # 如果是听力选择题，转为 choice，并保留 audio_text
+                    if q.get('options') and isinstance(q.get('options'), (dict, list)):
+                         q['type'] = 'choice' # Frontend uses 'type' or 'quiz_type'
+                    else:
+                         q['type'] = 'blank'
+                elif q_type in ['choice', 'vocabulary', 'reading']:
+                    q['type'] = 'choice'
+                elif q_type in ['blank', 'ordering']:
+                    q['type'] = 'blank'
+                elif q_type == 'translation':
+                    q['type'] = 'translation'
+                elif q_type == 'writing':
+                    q['type'] = 'writing'
+                else:
+                    q['type'] = 'choice' if q.get('options') else 'blank'
+                
+                # 确保有id
+                if 'id' not in q:
+                    q['id'] = len(valid_questions) + 1
+                    
+                valid_questions.append(q)
+            
+            # 如果数量不够，进行Fallback
+            if len(valid_questions) < count:
+                logger.warning(f"Only generated {len(valid_questions)} valid questions, falling back...")
+                fallback = self._fallback_generate(context=context, quiz_type=quiz_type, count=count - len(valid_questions))
+                for q in fallback:
+                    q['id'] = len(valid_questions) + 1
+                    valid_questions.append(q)
+            
+            return valid_questions[:count]
+            
+        except Exception as e:
+            logger.error(f"Error in generate_custom_quiz: {e}", exc_info=True)
+            # Fallback
+            return self._fallback_generate(context=context, quiz_type=quiz_type, count=count)
+
+    def _generate_custom_quiz_batch(
+        self,
+        context: str,
+        quiz_type: str,
+        count: int,
+        difficulty: str = "intermediate"
+    ) -> List[Dict[str, Any]]:
+        """
+        专门用于智能问答模式的出题逻辑（独立于练习中心）
+        """
+        # 处理复合题型
+        real_quiz_type = quiz_type.split(":")[0] if ":" in quiz_type else quiz_type
+        
+        # 构建提示词
+        base_prompt = f"""你是一个智能英语出题助手。
+用户希望基于以下内容（或主题）生成 {count} 道 {difficulty} 难度的 {real_quiz_type} 题目。
+
+**参考内容/主题：**
+{context}
+
+**出题要求：**
+1. **紧扣内容**：如果参考内容是具体文章，请基于文章出题；如果参考内容仅是主题关键词（如"Topic: ..."），请基于该主题的通用知识出题。
+2. **难度适配**：{difficulty} (easy: 基础/直白; intermediate: 四级水平; hard: 六级/雅思水平)。
+3. **格式严格**：必须返回合法的 JSON 数组。
+"""
+
+        type_specific_prompts = {
+            "choice": """
+**题型：单项选择题 (Choice)**
+- 生成包含题干、选项(A/B/C/D)、正确答案、解析的题目。
+- 考察点可以是：词汇辨析、语法、阅读理解（如果提供了长文）。
+- 格式示例：
+[
+  {
+    "question": "题目内容...",
+    "quiz_type": "choice",
+    "options": {"A": "...", "B": "...", "C": "...", "D": "..."},
+    "correct_answer": "A",
+    "explanation": "解析..."
+  }
+]""",
+            "blank": """
+**题型：填空题 (Blank)**
+- 生成包含题干、正确答案、解析的题目。
+- 题干中用 "_____" 表示空缺。
+- 格式示例：
+[
+  {
+    "question": "Please fill in the blank: The sky is _____ (blue).",
+    "quiz_type": "blank",
+    "correct_answer": "blue",
+    "explanation": "解析..."
+  }
+]""",
+            "translation": """
+**题型：翻译题 (Translation)**
+- 生成中文句子要求翻译成英文，或反之。
+- 格式示例：
+[
+  {
+    "question": "请翻译：The meeting was cancelled.",
+    "quiz_type": "translation",
+    "correct_answer": "会议被取消了。",
+    "explanation": "解析..."
+  }
+]""",
+            "listening": """
+**题型：听力理解 (Listening)**
+- 必须包含 `audio_text` 字段（用于生成语音）。
+- 可以是选择题形式。
+- 格式示例：
+[
+  {
+    "question": "Listen and choose the correct answer.",
+    "quiz_type": "listening",
+    "audio_text": "This is the audio content...",
+    "options": {"A": "...", "B": "...", "C": "...", "D": "..."},
+    "correct_answer": "A",
+    "explanation": "解析..."
+  }
+]""",
+            "reading": """
+**题型：阅读理解 (Reading)**
+- 必须包含 `passage` 字段（文章内容）。
+- 如果参考内容已经很长，可以直接引用或改写；如果参考内容很短，请根据主题创作一段短文。
+- 格式示例：
+[
+  {
+    "passage": "文章内容...",
+    "question": "问题...",
+    "quiz_type": "reading",
+    "options": {"A": "...", "B": "...", "C": "...", "D": "..."},
+    "correct_answer": "A",
+    "explanation": "解析..."
+  }
+]""",
+            "writing": """
+**题型：写作题 (Writing)**
+- 提供写作话题和要求。
+- 格式示例：
+[
+  {
+    "topic": "写作话题...",
+    "quiz_type": "writing",
+    "requirements": ["要求1", "要求2"],
+    "word_count": "150 words",
+    "correct_answer": "参考范文..."
+  }
+]"""
+        }
+
+        prompt = base_prompt + type_specific_prompts.get(real_quiz_type, type_specific_prompts["choice"])
+        prompt += f"\n\n请直接返回 JSON 数组，包含 {count} 道题目。不要包含 Markdown 标记（如 ```json）。"
+
+        messages = [
+            {"role": "system", "content": "你是一个严格遵循JSON格式的API。"},
+            {"role": "user", "content": prompt}
+        ]
+
+        # 重试机制
+        for attempt in range(2):
+            try:
+                response = self.chat(messages, temperature=0.7, max_tokens=3000)
+                
+                # JSON 解析逻辑 (复用现有的健壮解析逻辑)
+                import json
+                import re
+                
+                if "```json" in response:
+                    json_str = response.split("```json")[1].split("```")[0].strip()
+                elif "```" in response:
+                    json_str = response.split("```")[1].split("```")[0].strip()
+                else:
+                    json_str = response.strip()
+                    
+                # 简单清洗
+                json_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', json_str)
+                
+                try:
+                    questions = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # 尝试修复常见错误
+                    json_str = re.sub(r',\s*}', '}', json_str)
+                    json_str = re.sub(r',\s*]', ']', json_str)
+                    questions = json.loads(json_str)
+                    
+                if isinstance(questions, dict) and 'questions' in questions:
+                    questions = questions['questions']
+                    
+                if isinstance(questions, list) and len(questions) > 0:
+                    return questions
+                
+                logger.warning(f"Attempt {attempt+1}: Parsed JSON but got empty or invalid questions: {questions}")
+                
+            except Exception as e:
+                logger.error(f"Error in _generate_custom_quiz_batch attempt {attempt+1}: {e}")
+                # 继续下一次重试
+        
+        # 所有重试失败
+        return []
+
+
 
     def generate_quiz(
         self,
@@ -533,6 +785,7 @@ class LLMService:
                 qtext = base_sentence.replace(correct, "_____") if base_sentence else f"选择与句意相符的单词：_____"
                 items.append({
                     "question": qtext,
+                    "type": "choice",
                     "quiz_type": "choice",
                     "options": options,
                     "correct_answer": correct_key,
@@ -546,17 +799,20 @@ class LLMService:
                 qtext = base_sentence.replace(correct, "_____") if base_sentence else f"填空：{correct[0]}____"
                 items.append({
                     "question": qtext,
+                    "type": "blank",
                     "quiz_type": "blank",
                     "correct_answer": correct,
                     "explanation": ""
                 })
             else:
                 if not unique_words:
-                    break
-                target = random.choice(unique_words)
+                    target = "Example"
+                else:
+                    target = random.choice(unique_words)
                 items.append({
                     "question": f"请翻译或回答：{target}",
-                    "quiz_type": quiz_type,
+                    "type": "translation",
+                    "quiz_type": "translation",
                     "correct_answer": target,
                     "explanation": ""
                 })

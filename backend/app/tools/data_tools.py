@@ -115,7 +115,7 @@ def _get_subsection_content_summary(db: Session, subsection_id: int) -> str:
     
     # 1. 优先从 SubSection.content 获取
     if sub.content and len(sub.content) > 10:
-        content_summary = f"【知识点内容】\n{sub.content}"
+        content_summary = f"【小节 {sub.title} 知识点内容】\n{sub.content}"
         return content_summary
         
     # 2. 尝试查询关联的 KnowledgePoint
@@ -137,7 +137,7 @@ def _get_subsection_content_summary(db: Session, subsection_id: int) -> str:
             summary_parts.extend([f"- {kp.content}" for kp in others])
             
         if summary_parts:
-            content_summary = "【知识点内容】\n" + "\n".join(summary_parts)
+            content_summary = f"【小节 {sub.title} 知识点内容】\n" + "\n".join(summary_parts)
             return content_summary
 
     # 3. RAG 搜索
@@ -150,7 +150,7 @@ def _get_subsection_content_summary(db: Session, subsection_id: int) -> str:
         )
         
         if context_text:
-            content_summary = f"【知识点内容】\n{context_text}"
+            content_summary = f"【小节 {sub.title} 知识点内容】\n{context_text}"
             return content_summary
             
         # 模糊搜索
@@ -162,13 +162,49 @@ def _get_subsection_content_summary(db: Session, subsection_id: int) -> str:
             for res in search_res:
                 content = res.get('content', '')
                 combined_content += content + "\n\n"
-            content_summary = f"【知识点内容】\n{combined_content[:1000]}"
+            content_summary = f"【小节 {sub.title} 知识点内容】\n{combined_content[:1000]}"
             return content_summary
             
     except Exception as e:
         print(f"Error fetching content summary: {e}")
         
     return content_summary
+
+def get_learning_content(db: Session, context_type: str, context_id: int) -> str:
+    """
+    根据上下文类型获取学习内容
+    """
+    content = ""
+    
+    if context_type == 'subsection':
+        content = _get_subsection_content_summary(db, context_id)
+        
+    elif context_type == 'section':
+        subsections = db.query(SubSection).filter(SubSection.section_id == context_id).all()
+        parts = []
+        for sub in subsections:
+            sub_content = _get_subsection_content_summary(db, sub.id)
+            if sub_content:
+                parts.append(sub_content)
+        content = "\n\n".join(parts)
+        
+    elif context_type == 'chapter':
+        sections = db.query(Section).filter(Section.chapter_id == context_id).all()
+        parts = []
+        for section in sections:
+            subsections = db.query(SubSection).filter(SubSection.section_id == section.id).all()
+            for sub in subsections:
+                sub_content = _get_subsection_content_summary(db, sub.id)
+                if sub_content:
+                    parts.append(sub_content)
+        # Limit content length for chapters to avoid exceeding context window
+        full_content = "\n\n".join(parts)
+        if len(full_content) > 15000:
+            content = full_content[:15000] + "\n...(content truncated)..."
+        else:
+            content = full_content
+            
+    return content
 
 def get_student_learning_progress(db: Session, student_id: int) -> Dict[str, Any]:
     """

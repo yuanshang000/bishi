@@ -47,10 +47,18 @@ class ChatResponse(ChatBase):
     assistant_message: str
     message_role: str
     doc_count: int
+    chat_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+class QuizSubmissionRequest(BaseModel):
+    """测验提交请求"""
+    user_answers: Dict[str, Any] = Field(..., description="用户答案")
+    score: Optional[float] = Field(None, description="分数")
+    is_correct: Optional[List[bool]] = Field(None, description="每题是否正确")
+
 
 
 class ChatHistoryResponse(BaseModel):

@@ -543,7 +543,11 @@ class RAGService:
     ) -> tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         为查询获取上下文
-
+        
+        优化：
+        1. 如果 query 完全匹配章节/小节标题，提高其检索优先级。
+        2. 如果提供了 chapter_id，严格过滤。
+        
         Args:
             query: 查询文本
             chapter_id: 章节ID
@@ -552,11 +556,27 @@ class RAGService:
         Returns:
             tuple: (上下文文本, 使用的文档元数据列表)
         """
+        # 如果 query 包含章节引用（如"1.1.1 掌握核心..."），提取关键部分进行精确匹配
+        # 这里假设 query 可能是 "1.1.1 掌握核心..." 这样的格式
+        
+        # 尝试进行更宽松的搜索（先不带 chapter_id 过滤，或者如果有明确的 chapter_id 引用则使用）
+        # 这里我们简单地直接搜索，因为 Chroma 的语义搜索应该能处理
+        
         results = self.search(query, chapter_id=chapter_id, top_k=5)
 
         if not results:
-            logger.warning("No search results found for context")
-            return "", [], []
+            # 尝试放宽搜索条件：如果是精确标题搜索失败，尝试只搜索关键词
+            # 例如 "1.1.1 掌握核心..." -> "掌握核心"
+            import re
+            # 移除 1.1.1 这样的序号
+            clean_query = re.sub(r'^\d+(\.\d+)*\s*', '', query).strip()
+            if clean_query and clean_query != query:
+                logger.info(f"Retrying search with cleaned query: '{clean_query}'")
+                results = self.search(clean_query, chapter_id=chapter_id, top_k=5)
+            
+            if not results:
+                logger.warning("No search results found for context")
+                return "", [], []
 
         # 拼接上下文，控制长度
         context_parts = []
@@ -568,15 +588,22 @@ class RAGService:
             content = result['content']
             metadata = result['metadata']
 
-            if current_length + len(content) > max_length:
+            # 优化：如果是章节/小节内容，加上标题前缀，让 LLM 知道这是哪里的内容
+            title_prefix = ""
+            if metadata.get('title'):
+                title_prefix = f"【{metadata.get('doc_type', '文档')}: {metadata.get('title')}】\n"
+            
+            full_content = title_prefix + content
+
+            if current_length + len(full_content) > max_length:
                 # 截断最后一部分
                 remaining = max_length - current_length
                 if remaining > 100:  # 至少保留100字符
-                    context_parts.append(content[:remaining] + "...")
+                    context_parts.append(full_content[:remaining] + "...")
                 break
 
-            context_parts.append(content)
-            current_length += len(content)
+            context_parts.append(full_content)
+            current_length += len(full_content)
 
             # 收集文档信息（去重）
             doc_info = {
@@ -599,9 +626,7 @@ class RAGService:
             used_chunks.append(chunk_preview)
 
         logger.info(f"Context built from {len(used_documents)} documents, total length: {current_length} chars")
-        for doc in used_documents:
-            logger.info(f"  - Using document: {doc}")
-
+        
         return "\n\n---\n\n".join(context_parts), used_documents, used_chunks
 
     def get_context_for_subsection(

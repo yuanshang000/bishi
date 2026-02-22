@@ -1,42 +1,80 @@
 <template>
   <div class="chat-container">
     <el-container class="chat-layout">
-      <!-- 左侧会话列表 (仅在聊天模式下显示) -->
-      <el-aside v-if="mode === 'chat'" width="280px" class="session-sidebar">
-        <div class="sidebar-header">
-          <h3>会话记录</h3>
-          <el-button type="primary" size="small" @click="handleNewSession">
-            <el-icon><Plus /></el-icon>
-            新会话
-          </el-button>
+      <!-- 左侧边栏 -->
+      <el-aside width="280px" class="session-sidebar">
+        <div class="sidebar-tabs">
+           <div 
+             :class="['sidebar-tab', { active: activeTab === 'session' }]" 
+             @click="activeTab = 'session'; mode = 'chat'"
+           >
+             会话
+           </div>
+           <div 
+             :class="['sidebar-tab', { active: activeTab === 'history' }]" 
+             @click="activeTab = 'history'; mode = 'quiz'"
+           >
+             出题历史
+           </div>
         </div>
 
-        <div class="session-list">
-          <div
-            v-for="session in sessions"
-            :key="session.session_id"
-            :class="['session-item', { active: session.session_id === sessionId }]"
-            @click="handleLoadSession(session)"
-          >
-            <div class="session-preview">
-              {{ session.preview || '新对话' }}
+        <!-- 会话列表 -->
+        <div v-if="activeTab === 'session'" class="sidebar-content-wrapper">
+            <div class="sidebar-action">
+              <el-button type="primary" size="small" @click="handleNewSession" style="width: 100%">
+                <el-icon><Plus /></el-icon>
+                新会话
+              </el-button>
             </div>
-            <div class="session-meta">
-              <span class="session-time">{{ formatTime(session.last_message_at) }}</span>
-              <span class="session-count">{{ session.message_count }} 条消息</span>
+    
+            <div class="session-list">
+              <div
+                v-for="session in sessions"
+                :key="session.session_id"
+                :class="['session-item', { active: session.session_id === sessionId }]"
+                @click="handleLoadSession(session)"
+              >
+                <div class="session-preview">
+                  {{ session.preview || '新对话' }}
+                </div>
+                <div class="session-meta">
+                  <span class="session-time">{{ formatTime(session.last_message_at) }}</span>
+                  <span class="session-count">{{ session.message_count }} 条消息</span>
+                </div>
+                <el-button
+                  type="danger"
+                  size="small"
+                  text
+                  class="delete-btn"
+                  @click.stop="handleDeleteSession(session.session_id)"
+                >
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+              </div>
+    
+              <el-empty v-if="sessions.length === 0" description="暂无会话记录" :image-size="80" />
             </div>
-            <el-button
-              type="danger"
-              size="small"
-              text
-              class="delete-btn"
-              @click.stop="handleDeleteSession(session.session_id)"
-            >
-              <el-icon><Delete /></el-icon>
-            </el-button>
-          </div>
+        </div>
 
-          <el-empty v-if="sessions.length === 0" description="暂无会话记录" :image-size="80" />
+        <!-- 出题历史列表 -->
+        <div v-else class="sidebar-content-wrapper">
+             <div class="sidebar-action">
+                 <el-button type="default" size="small" @click="fetchQuizHistoryList" :loading="historyLoading" style="width: 100%">
+                    刷新列表
+                 </el-button>
+             </div>
+             <div class="session-list">
+                <div v-for="item in quizHistoryList" :key="item.id" class="history-item" @click="handleLoadQuizHistory(item)">
+                    <div class="history-prompt">{{ getQuizPrompt(item) }}</div>
+                    <div class="history-meta">
+                        <span>{{ formatTime(item.created_at) }}</span>
+                        <el-tag size="small" :type="isQuizCompleted(item) ? 'success' : 'info'" effect="plain">
+                           {{ isQuizCompleted(item) ? '已完成' : '未完成' }}
+                        </el-tag>
+                    </div>
+                </div>
+                <el-empty v-if="quizHistoryList.length === 0" description="暂无出题记录" :image-size="80" />
+             </div>
         </div>
       </el-aside>
 
@@ -92,9 +130,39 @@
               <p class="quiz-subtitle">输入您的要求，AI将为您生成个性化练习题</p>
               
               <div class="quiz-form">
+                <!-- Chapter Selector Popover for Quiz Mode -->
+                <div v-if="showChapterSelector" class="chapter-selector-popover quiz-popover">
+                  <div class="chapter-selector-header">
+                    <span>请选择章节上下文</span>
+                    <el-button size="small" circle @click="showChapterSelector = false"><el-icon><Close /></el-icon></el-button>
+                  </div>
+                  
+                  <div class="chapter-list-container" v-if="chapterStore.chapters && chapterStore.chapters.length > 0">
+                     <el-tree
+                        :data="chapterTreeData"
+                        :props="defaultProps"
+                        @node-click="handleNodeClick"
+                        class="chapter-tree"
+                        highlight-current
+                        :expand-on-click-node="false"
+                        default-expand-all
+                     >
+                        <template #default="{ node, data }">
+                            <span class="custom-tree-node">
+                               <span>{{ node.label }}</span>
+                               <span v-if="data.type" class="node-type-tag">{{ data.type_label }}</span>
+                            </span>
+                        </template>
+                     </el-tree>
+                  </div>
+                  <div v-else class="no-chapter-data">
+                    暂无章节数据
+                  </div>
+                </div>
+
                 <el-input
                   v-model="quizPrompt"
-                  placeholder="请输入出题提示词（例如：帮我出一套关于商务英语邮件写作的题目，包含选择题和填空题，难度中等）"
+                  placeholder="请输入出题提示词（支持输入 # 选择章节、节或小节，AI将基于所选内容出题）"
                   :rows="6"
                   type="textarea"
                   class="quiz-prompt-input-large"
@@ -249,7 +317,8 @@
 </template>
 
 <script setup lang="ts">
-import { deleteChatSession, getChatHistory, getChatSessions, sendChatMessage } from '@/api'
+import { deleteChatSession, getChatHistory, getChatQuizHistory, getChatSessions, sendChatMessage, submitQuizResult } from '@/api'
+
 import { useChapterStore } from '@/stores'
 import { Close, Delete, Loading, Picture, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -260,6 +329,10 @@ const messages = ref<any[]>([])
 const inputMessage = ref('')
 const loading = ref(false)
 const mode = ref('chat') // 'chat' or 'quiz'
+const activeTab = ref('session') // 'session' or 'history'
+const quizHistoryList = ref<any[]>([])
+const currentQuizId = ref<number | null>(null)
+
 const quizPrompt = ref('')
 const quizData = ref<any>(null)
 const userAnswers = ref<any>({})
@@ -301,6 +374,8 @@ const defaultProps = {
   label: 'label',
 }
 
+const quizContext = ref<{type: string, id: number, label: string} | null>(null)
+
 watch(inputMessage, async (newVal) => {
   if (newVal.endsWith('#') || newVal.endsWith('＃')) {
     // Ensure chapters are loaded
@@ -320,17 +395,44 @@ watch(inputMessage, async (newVal) => {
   }
 })
 
+watch(quizPrompt, async (newVal) => {
+  if (mode.value === 'quiz') {
+    if (newVal.endsWith('#') || newVal.endsWith('＃')) {
+      if (!chapterStore.chapters || chapterStore.chapters.length === 0) {
+          chapterStore.fetchChapters()
+      }
+      showChapterSelector.value = true
+    } else if (!newVal.includes('#') && !newVal.includes('＃')) {
+      showChapterSelector.value = false
+    }
+    
+    if (quizContext.value && !newVal.includes(`【参考：${quizContext.value.label}】`)) {
+        quizContext.value = null
+    }
+  }
+})
+
 const handleNodeClick = (data: any) => {
   // Replace the trailing # with the selected text formatted as a tag/context
-  inputMessage.value = inputMessage.value.replace(/([#＃])$/, `【参考：${data.value}】 `)
-  showChapterSelector.value = false
-  
-  // 保存上下文信息
-  selectedContext.value = {
-      type: data.type,
-      id: data.id,
-      label: data.value
+  const tag = `【参考：${data.value}】 `
+  if (mode.value === 'chat') {
+      inputMessage.value = inputMessage.value.replace(/([#＃])$/, tag)
+      // 保存上下文信息
+      selectedContext.value = {
+          type: data.type,
+          id: data.id,
+          label: data.value
+      }
+  } else {
+      quizPrompt.value = quizPrompt.value.replace(/([#＃])$/, tag)
+      // 保存上下文信息
+      quizContext.value = {
+          type: data.type,
+          id: data.id,
+          label: data.value
+      }
   }
+  showChapterSelector.value = false
 }
 
 const resetQuiz = () => {
@@ -339,9 +441,189 @@ const resetQuiz = () => {
   isSubmitted.value = false
 }
 
-const submitQuiz = () => {
+const historyLoading = ref(false)
+
+const fetchQuizHistoryList = async () => {
+    historyLoading.value = true
+    try {
+        const res: any = await getChatQuizHistory({ limit: 50 })
+        quizHistoryList.value = res || []
+    } catch (e) {
+        console.error(e)
+        ElMessage.error('获取出题历史失败')
+    } finally {
+        historyLoading.value = false
+    }
+}
+
+const getQuizPrompt = (item: any) => {
+    // 兼容新旧数据结构
+    if (item.topic) {
+        return item.topic.length > 30 ? item.topic.substring(0, 30) + '...' : item.topic
+    }
+    
+    let prompt = item.user_message || ''
+    // Clean up system instructions
+    if (prompt.includes('用户的出题提示词:')) {
+        const parts = prompt.split('用户的出题提示词:')
+        if (parts.length > 1) {
+            prompt = parts[1].trim()
+        }
+    }
+    return prompt.length > 30 ? prompt.substring(0, 30) + '...' : prompt
+}
+
+const isQuizCompleted = (item: any) => {
+    // 兼容新旧数据结构
+    if (item.is_completed !== undefined) {
+        return item.is_completed
+    }
+    if (item.user_answers) {
+        return true
+    }
+    return !!(item.chat_metadata && item.chat_metadata.user_answers)
+}
+
+const handleLoadQuizHistory = (item: any) => {
+    // 如果是新版数据结构，直接使用
+    // 关键修复：增加长度判断，因为后端返回未完成的记录时 questions 可能是空数组
+    if (item.questions && item.questions.length > 0) {
+        currentQuizId.value = item.chat_history_id || item.id // 优先使用 chat_history_id 以兼容提交接口
+        quizData.value = {
+            questions: item.questions,
+            quiz_type: item.quiz_type
+        }
+        
+        // 关键修复：
+        // 1. 如果有 user_answers，则加载用户的答案
+        // 2. 只有当 item.is_completed 为 true 时，才设为“已提交”状态
+        // 3. 如果只是有答案但未完成（理论上不应发生，但为了保险），也允许继续编辑
+        if (item.user_answers) {
+            userAnswers.value = item.user_answers
+        } else {
+            userAnswers.value = {}
+        }
+        
+        isSubmitted.value = !!item.is_completed
+        
+        showQuizModal.value = true
+        return
+    }
+
+    // 旧版解析逻辑 (或者处理未完成的 ChatHistory 记录)
+    // 这里的 item.id 是 chat_history_id
+    currentQuizId.value = item.chat_history_id || item.id
+    
+    // Parse quiz data
+    let quizJson = null
+    try {
+        // Try direct parse first
+        try {
+          // Remove potential markdown wrappers
+          let cleanMsg = item.assistant_message.replace(/```json\s*/g, '').replace(/```\s*/g, '')
+          const parsed = JSON.parse(cleanMsg)
+          if (parsed.generate_interactive_quiz_response) {
+            quizJson = parsed.generate_interactive_quiz_response
+          } else {
+            quizJson = parsed
+          }
+        } catch (e) {}
+        
+        if (!quizJson) {
+           const match = item.assistant_message.match(/\{[\s\S]*"generate_interactive_quiz_response"[\s\S]*\}/)
+           if (match) {
+               const parsed = JSON.parse(match[0])
+               quizJson = parsed.generate_interactive_quiz_response
+           } else {
+               // Try looser regex
+               const match2 = item.assistant_message.match(/\{[\s\S]*"questions"[\s\S]*\}/)
+               if (match2) {
+                   const parsed = JSON.parse(match2[0])
+                   quizJson = parsed.generate_interactive_quiz_response || parsed
+               }
+           }
+        }
+    } catch (e) {
+        console.error("Failed to parse quiz history", e)
+    }
+    
+    if (quizJson) {
+        quizData.value = quizJson
+        
+        // Set user answers if available
+        if (item.chat_metadata && item.chat_metadata.user_answers) {
+            userAnswers.value = item.chat_metadata.user_answers
+            isSubmitted.value = true
+        } else {
+            userAnswers.value = {}
+            isSubmitted.value = false
+        }
+        
+        showQuizModal.value = true
+    } else {
+        ElMessage.error('无法解析该题目的数据')
+    }
+}
+
+watch(activeTab, (val) => {
+    if (val === 'history') {
+        fetchQuizHistoryList()
+    }
+})
+
+const submitQuiz = async () => {
+  // 1. Calculate Score
+  let correctCount = 0
+  let totalCount = 0
+  const results: boolean[] = []
+  
+  if (quizData.value && quizData.value.questions) {
+      quizData.value.questions.forEach((q: any, index: number) => {
+          totalCount++
+          const userAns = userAnswers.value[index]
+          const correctAns = q.correct_answer
+          
+          // Normalize for comparison
+          let isCorrect = false
+          if (userAns && correctAns) {
+             // For choice questions (A, B, C, D)
+             if (q.quiz_type === 'choice' || q.type === 'choice') {
+                 isCorrect = userAns.toString().trim().toUpperCase() === correctAns.toString().trim().toUpperCase()
+             } else {
+                 // For others, simple string match
+                 isCorrect = userAns.toString().trim().toLowerCase() === correctAns.toString().trim().toLowerCase()
+             }
+          }
+          
+          if (isCorrect) correctCount++
+          results.push(isCorrect)
+      })
+  }
+  
+  const score = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0
+  
+  // 2. Submit to backend
+  if (currentQuizId.value) {
+      try {
+          await submitQuizResult(currentQuizId.value, {
+              user_answers: userAnswers.value,
+              score: score,
+              is_correct: results
+          })
+          ElMessage.success(`提交成功！得分: ${score}`)
+          // Refresh history if in history tab
+          if (activeTab.value === 'history') {
+              fetchQuizHistoryList()
+          }
+      } catch (e) {
+          console.error(e)
+          ElMessage.warning('提交失败，但答案已在本地显示解析')
+      }
+  } else {
+      ElMessage.success('答案已提交，请查看解析')
+  }
+  
   isSubmitted.value = true
-  ElMessage.success('答案已提交，请查看解析')
 }
 const sessionId = ref('')
 const messagesRef = ref<HTMLElement>()
@@ -349,6 +631,8 @@ const sessions = ref<any[]>([])
 const selectedImage = ref<string>('')  // 存储选中的图片base64
 
 const currentSessionMessageCount = computed(() => messages.value.length)
+
+// onMounted should be imported from 'vue' - it is already imported in the file
 
 onMounted(async () => {
   await chapterStore.fetchChapters()
@@ -375,6 +659,7 @@ const handleNewSession = () => {
   sessionId.value = Date.now().toString()
   messages.value = []
   inputMessage.value = ''
+  selectedImage.value = ''
 
   ElMessage.success('已创建新会话')
 }
@@ -387,18 +672,24 @@ const handleLoadSession = async (session: any) => {
 
     // 转换历史记录为消息格式
     messages.value = []
-    history.forEach((record: any) => {
-      messages.value.push({
-        id: `user-${record.id}`,
-        role: 'user',
-        content: record.user_message
+    if (history) {
+      history.forEach((record: any) => {
+        messages.value.push({
+          id: `user-${record.id}`,
+          role: 'user',
+          content: record.user_message
+        })
+        messages.value.push({
+          id: `assistant-${record.id}`,
+          role: 'assistant',
+          content: record.assistant_message
+        })
       })
-      messages.value.push({
-        id: `assistant-${record.id}`,
-        role: 'assistant',
-        content: record.assistant_message
-      })
-    })
+    }
+    
+    // 如果是切换会话，清空输入框和图片
+    inputMessage.value = ''
+    selectedImage.value = ''
 
     scrollToBottom()
   } catch (error: any) {
@@ -440,10 +731,72 @@ const handleDeleteSession = async (sessionIdToDelete: string) => {
   }
 }
 
-const handleGenerateQuiz = () => {
+const handleGenerateQuiz = async () => {
   if (!quizPrompt.value.trim()) return
-  inputMessage.value = quizPrompt.value
-  handleSend()
+  
+  loading.value = true
+  
+  try {
+    const requestData: any = {
+      message: quizPrompt.value,
+      session_id: sessionId.value, // 可以使用当前会话ID，或者生成临时的
+      use_rag: true,
+      mode: 'quiz'
+    }
+    
+    // 如果有选中的上下文，添加到请求中
+    if (quizContext.value && quizPrompt.value.includes(`【参考：${quizContext.value.label}】`)) {
+        requestData.context_type = quizContext.value.type
+        requestData.context_id = quizContext.value.id
+    }
+    
+    const res: any = await sendChatMessage(requestData)
+    
+    // 保存当前 Quiz ID
+    if (res && res.id) {
+        currentQuizId.value = res.id
+    }
+    
+    let quizJson = null
+    // Try direct parse
+    try {
+      const parsed = JSON.parse(res.assistant_message)
+      if (parsed.generate_interactive_quiz_response) {
+        quizJson = parsed.generate_interactive_quiz_response
+      }
+    } catch (e) {}
+    
+    // Try regex if direct parse failed
+    if (!quizJson) {
+      const match = res.assistant_message.match(/\{[\s\S]*"generate_interactive_quiz_response"[\s\S]*\}/)
+      if (match) {
+         const parsed = JSON.parse(match[0])
+         quizJson = parsed.generate_interactive_quiz_response
+      }
+    }
+    
+    if (quizJson) {
+       quizData.value = quizJson
+       showQuizModal.value = true
+       ElMessage.success('题目生成成功！')
+       // 成功生成题目后，不将消息添加到聊天记录中，保持出题模式的纯净
+       // 刷新出题历史
+       if (activeTab.value === 'history') {
+           fetchQuizHistoryList()
+       }
+       loading.value = false
+       return
+    } else {
+       ElMessage.warning('未能生成有效题目格式，请重试')
+       console.log("Raw response:", res.assistant_message)
+    }
+    
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('生成题目失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 const handleSend = async () => {
@@ -474,6 +827,7 @@ const handleSend = async () => {
     }
     
     // 如果有选中的上下文，添加到请求中
+    // 检查输入框内容是否包含选中的标签
     if (selectedContext.value && userMessage.includes(`【参考：${selectedContext.value.label}】`)) {
         requestData.context_type = selectedContext.value.type
         requestData.context_id = selectedContext.value.id
@@ -493,9 +847,15 @@ const handleSend = async () => {
         let quizJson = null
         // Try direct parse
         try {
-          const parsed = JSON.parse(res.assistant_message)
+          // Check if response is wrapped in XML tag <quiz> or similar, or just plain JSON
+          // Clean up potential markdown code blocks ```json ... ```
+          let cleanMsg = res.assistant_message.replace(/```json\s*/g, '').replace(/```\s*/g, '')
+          const parsed = JSON.parse(cleanMsg)
           if (parsed.generate_interactive_quiz_response) {
             quizJson = parsed.generate_interactive_quiz_response
+          } else {
+             // Maybe it's the root object directly?
+             quizJson = parsed
           }
         } catch (e) {}
         
@@ -505,14 +865,27 @@ const handleSend = async () => {
           if (match) {
              const parsed = JSON.parse(match[0])
              quizJson = parsed.generate_interactive_quiz_response
+          } else {
+             // Try looser regex for just the object if the key is missing wrapper
+             const match2 = res.assistant_message.match(/\{[\s\S]*"questions"[\s\S]*\}/)
+             if (match2) {
+                const parsed = JSON.parse(match2[0])
+                quizJson = parsed.generate_interactive_quiz_response || parsed
+             }
           }
         }
         
         if (quizJson) {
-           quizData.value = quizJson
-           showQuizModal.value = true
-           ElMessage.success('题目生成成功！')
-        }
+       quizData.value = quizJson
+       // Force update session list if needed, but DO NOT add message to current view
+       showQuizModal.value = true
+       ElMessage.success('题目生成成功！')
+       loading.value = false
+       return 
+    } else {
+       // 如果解析失败，可能是LLM返回了普通文本回复，此时按普通消息处理
+       console.log("Quiz parse failed, fallback to message display", res.assistant_message)
+    }
       } catch (e) {
         console.error("Quiz parsing error", e)
       }
@@ -528,9 +901,9 @@ const handleSend = async () => {
 
     // 刷新会话列表
     await fetchSessions()
-  } catch (e) {
+  } catch (e: any) {
     console.error(e)
-    ElMessage.error('发送失败')
+    ElMessage.error(e.message || '发送失败')
   } finally {
     loading.value = false
   }
@@ -989,6 +1362,7 @@ const handlePaste = (event: ClipboardEvent) => {
   padding: 30px;
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  position: relative;
 }
 
 .quiz-prompt-input-large :deep(.el-textarea__inner) {
@@ -1091,5 +1465,81 @@ const handlePaste = (event: ClipboardEvent) => {
 
 .value {
   color: #303133;
+}
+
+/* Sidebar Tabs */
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid #EBEEF5;
+  background: white;
+}
+
+.sidebar-tab {
+  flex: 1;
+  text-align: center;
+  padding: 12px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #606266;
+  border-bottom: 2px solid transparent;
+  transition: all 0.3s;
+}
+
+.sidebar-tab:hover {
+  color: #409EFF;
+}
+
+.sidebar-tab.active {
+  color: #409EFF;
+  border-bottom-color: #409EFF;
+  background: #ECF5FF;
+}
+
+.sidebar-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-action {
+  padding: 10px 20px;
+  background: white;
+  border-bottom: 1px solid #EBEEF5;
+}
+
+/* History List */
+.history-item {
+  padding: 12px;
+  margin-bottom: 8px;
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: 1px solid transparent;
+}
+
+.history-item:hover {
+  border-color: #409EFF;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.1);
+}
+
+.history-prompt {
+  font-size: 14px;
+  color: #303133;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.history-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #909399;
 }
 </style>

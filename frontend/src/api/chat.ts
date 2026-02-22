@@ -1,5 +1,5 @@
+import type { ChatHistory, ChatRequest, ChatSession } from '@/types'
 import request from '@/utils/request'
-import type { ChatRequest, ChatHistory, ChatSession } from '@/types'
 
 // 发送聊天消息
 export const sendChatMessage = (data: ChatRequest) => {
@@ -20,3 +20,14 @@ export const getChatSessions = () => {
 export const deleteChatSession = (sessionId: string) => {
   return request.delete(`/chat/session/${sessionId}`)
 }
+
+// 获取出题历史
+export const getChatQuizHistory = (params?: { limit?: number }) => {
+  return request.get<any[]>('/chat/quiz/history', { params })
+}
+
+// 提交测验结果
+export const submitQuizResult = (messageId: number, data: any) => {
+  return request.post(`/chat/quiz/submit/${messageId}`, data)
+}
+
