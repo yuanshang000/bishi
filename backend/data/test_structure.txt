@@ -1,0 +1,18 @@
+ [章节] 英语基础（测试）
+ [节] 颜色与形容词
+ [小目标] 掌握颜色词汇与简单描述
+ ●权重占比：10%
+ ●合格分数：60分
+ 
+ 核心内容：
+ - red 表示红色，用于描述物体颜色。例如：The apple is red.
+ - blue 表示蓝色，用于描述天空或海洋。例如：The sky is blue.
+ - green 表示绿色，用于描述植物颜色。例如：The leaves are green.
+ 
+ [知识点:单词] red (adj.) 红色 [例句: The apple is red.]
+ [知识点:单词] blue (adj.) 蓝色 [例句: The sky is blue.]
+ [知识点:单词] green (adj.) 绿色 [例句: The leaves are green.]
+ [知识点:语法] 形容词位置：形容词通常位于名词前，如 a red apple
+ 
+ 说明：
+ 本小目标旨在让学生掌握基础颜色词汇及简单描述句型，适合难度为简单或中等的练习。
