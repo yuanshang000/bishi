@@ -264,6 +264,11 @@
       @close="resetQuiz"
     >
       <div v-if="quizData" class="quiz-modal-content">
+        <!-- Add quiz topic header -->
+        <div v-if="quizData.topic" class="quiz-topic-header">
+            <strong>出题要求：</strong> {{ quizData.topic }}
+        </div>
+        
         <div v-for="(q, index) in quizData.questions" :key="index" class="quiz-item">
           <div class="quiz-question-header">
             <span class="question-index">题目 {{ index + 1 }}</span>
@@ -485,13 +490,24 @@ const isQuizCompleted = (item: any) => {
 }
 
 const handleLoadQuizHistory = (item: any) => {
+    // 准备主题/提示词
+    // 清理一下 "用户的出题提示词:" 前缀，如果有的话
+    let topic = item.topic || item.user_message || ''
+    if (topic.includes('用户的出题提示词:')) {
+        const parts = topic.split('用户的出题提示词:')
+        if (parts.length > 1) {
+            topic = parts[1].trim()
+        }
+    }
+
     // 如果是新版数据结构，直接使用
     // 关键修复：增加长度判断，因为后端返回未完成的记录时 questions 可能是空数组
     if (item.questions && item.questions.length > 0) {
         currentQuizId.value = item.chat_history_id || item.id // 优先使用 chat_history_id 以兼容提交接口
         quizData.value = {
             questions: item.questions,
-            quiz_type: item.quiz_type
+            quiz_type: item.quiz_type,
+            topic: topic // 确保 topic 被传入
         }
         
         // 关键修复：
@@ -549,6 +565,10 @@ const handleLoadQuizHistory = (item: any) => {
     
     if (quizJson) {
         quizData.value = quizJson
+        // 确保旧版数据也有 topic
+        if (!quizData.value.topic) {
+            quizData.value.topic = topic
+        }
         
         // Set user answers if available
         if (item.chat_metadata && item.chat_metadata.user_answers) {
