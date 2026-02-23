@@ -21,6 +21,10 @@ from app.models.user import User
 from app.models.quiz import QuizRecord
 from app.models.subsection import SubSection
 from app.models.section import Section
+from app.models.chapter import Chapter
+from app.models.knowledge_point import KnowledgePoint
+from app.models.user_knowledge_stats import UserKnowledgePointStats
+from sqlalchemy import func
 from app.api.dependencies import get_db, get_current_active_user
 from app.services.quiz_service import quiz_service
 from app.services.word_training_service import word_training_service
@@ -525,3 +529,129 @@ def get_knowledge_points(
         "chapter_id": chapter_id,
         "knowledge_points": list(unique_points.values())
     }
+
+@router.get("/stats/teacher/grades", response_model=dict)
+async def get_teacher_grade_stats(
+    chapter_id: Optional[int] = None,
+    section_id: Optional[int] = None,
+    subsection_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    教师端：获取成绩分布统计
+    """
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="权限不足")
+    
+    # Only consider completed quizzes from students
+    # Group by user_id to get one record per student (average accuracy)
+    query = db.query(
+        QuizRecord.user_id,
+        func.avg(QuizRecord.accuracy).label("avg_accuracy")
+    ).join(User, QuizRecord.user_id == User.id)\
+     .filter(QuizRecord.is_completed == 1)\
+     .filter(User.role == "student")
+    
+    if subsection_id:
+        query = query.filter(QuizRecord.subsection_id == subsection_id)
+    elif section_id:
+        query = query.filter(QuizRecord.section_id == section_id)
+    elif chapter_id:
+        query = query.filter(QuizRecord.chapter_id == chapter_id)
+        
+    student_stats = query.group_by(QuizRecord.user_id).all()
+    total_students = len(student_stats)
+    
+    # Bucketize based on student average scores
+    buckets = {
+        "excellent": 0, # 90-100
+        "good": 0,      # 80-89
+        "fair": 0,      # 70-79
+        "pass": 0,      # 60-69
+        "fail": 0       # <60
+    }
+    
+    total_score_sum = 0
+    
+    for _, avg_acc in student_stats:
+        score = avg_acc if avg_acc is not None else 0
+        total_score_sum += score
+        if score >= 90:
+            buckets["excellent"] += 1
+        elif score >= 80:
+            buckets["good"] += 1
+        elif score >= 70:
+            buckets["fair"] += 1
+        elif score >= 60:
+            buckets["pass"] += 1
+        else:
+            buckets["fail"] += 1
+            
+    avg_score = (total_score_sum / total_students) if total_students > 0 else 0
+    
+    return {
+        "total_students": total_students,
+        "avg_score": round(avg_score, 1),
+        "distribution": [
+            {"name": "优秀 (90-100)", "value": buckets["excellent"]},
+            {"name": "良好 (80-89)", "value": buckets["good"]},
+            {"name": "中等 (70-79)", "value": buckets["fair"]},
+            {"name": "及格 (60-69)", "value": buckets["pass"]},
+            {"name": "不及格 (<60)", "value": buckets["fail"]}
+        ]
+    }
+
+
+@router.get("/stats/teacher/knowledge_points", response_model=List[dict])
+async def get_teacher_kp_stats(
+    chapter_id: Optional[int] = None,
+    section_id: Optional[int] = None,
+    subsection_id: Optional[int] = None,
+    limit: int = 4,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    教师端：获取知识点薄弱项统计 (Top N with lowest accuracy)
+    """
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="权限不足")
+        
+    # Aggregate stats from UserKnowledgePointStats
+    # Join path: UserKnowledgePointStats -> KnowledgePoint -> SubSection -> Section -> Chapter
+    
+    query = db.query(
+        KnowledgePoint.content,
+        func.sum(UserKnowledgePointStats.total_attempts).label("total"),
+        func.sum(UserKnowledgePointStats.correct_attempts).label("correct")
+    ).join(UserKnowledgePointStats, UserKnowledgePointStats.knowledge_point_id == KnowledgePoint.id)\
+     .join(SubSection, KnowledgePoint.subsection_id == SubSection.id)\
+     .join(Section, SubSection.section_id == Section.id)\
+     .join(Chapter, Section.chapter_id == Chapter.id)
+     
+    if subsection_id:
+        query = query.filter(SubSection.id == subsection_id)
+    elif section_id:
+        query = query.filter(Section.id == section_id)
+    elif chapter_id:
+        query = query.filter(Chapter.id == chapter_id)
+        
+    stats = query.group_by(KnowledgePoint.id, KnowledgePoint.content)\
+                 .having(func.sum(UserKnowledgePointStats.total_attempts) > 0)\
+                 .all()
+                 
+    # Calculate accuracy and sort
+    results = []
+    for content, total, correct in stats:
+        accuracy = (correct / total * 100) if total > 0 else 0
+        results.append({
+            "content": content,
+            "accuracy": round(accuracy, 1),
+            "total_attempts": total
+        })
+        
+    # Sort by accuracy ascending (lowest first)
+    results.sort(key=lambda x: x["accuracy"])
+    
+    return results[:limit]

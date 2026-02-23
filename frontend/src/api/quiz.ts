@@ -1,12 +1,12 @@
-import request from '@/utils/request'
 import type {
-  Quiz,
-  QuizCreateForm,
-  QuizCreateTargetedForm,
-  QuizSubmitForm,
-  QuizResult,
-  KnowledgePointsResponse
+    KnowledgePointsResponse,
+    Quiz,
+    QuizCreateForm,
+    QuizCreateTargetedForm,
+    QuizResult,
+    QuizSubmitForm
 } from '@/types'
+import request from '@/utils/request'
 
 // 创建练习
 export const createQuiz = (data: QuizCreateForm) => {
@@ -69,4 +69,14 @@ export const createSectionComprehensiveQuiz = (data: {
   count: number;
 }) => {
   return request.post<Quiz>('/quiz/comprehensive/generate', data)
+}
+
+// 教师端：获取成绩分布统计
+export const getTeacherGradeStats = (params: { chapter_id?: number; section_id?: number; subsection_id?: number }) => {
+  return request.get('/quiz/stats/teacher/grades', { params })
+}
+
+// 教师端：获取知识点薄弱项统计
+export const getTeacherKpStats = (params: { chapter_id?: number; section_id?: number; subsection_id?: number; limit?: number }) => {
+  return request.get('/quiz/stats/teacher/knowledge_points', { params })
 }

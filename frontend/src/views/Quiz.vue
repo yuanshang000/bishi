@@ -1,15 +1,20 @@
 <template>
   <div class="quiz-container">
-    <!-- 加载遮罩层 -->
-    <el-dialog
-      v-model="creating"
-      :show-close="false"
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      width="450px"
-      align-center
-      class="loading-dialog"
-    >
+    <!-- 教师端视图 -->
+    <TeacherQuiz v-if="userStore.isTeacher" />
+
+    <!-- 学生端视图 (原有内容) -->
+    <template v-else>
+      <!-- 加载遮罩层 -->
+      <el-dialog
+        v-model="creating"
+        :show-close="false"
+        :close-on-click-modal="false"
+        :close-on-press-escape="false"
+        width="450px"
+        align-center
+        class="loading-dialog"
+      >
       <div class="loading-content">
         <el-icon class="loading-icon" :size="60" color="#409EFF">
           <Loading />
@@ -1333,19 +1338,22 @@
         </div>
       </div>
     </el-dialog>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { createPersonalizedQuiz, createQuiz, createSectionComprehensiveQuiz, generateWordTraining, getMyLearningAnalysis, getQuiz, getQuizHistory, getQuizStats, getSubsectionStats, submitQuiz } from '@/api'
-import { useChapterStore } from '@/stores'
+import { useChapterStore, useUserStore } from '@/stores'
 import { DataAnalysis, Loading, Timer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { ElMessage, ElNotification } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import TeacherQuiz from './TeacherQuiz.vue'
 
 const router = useRouter()
+const userStore = useUserStore()
 const chapterStore = useChapterStore()
 const creating = ref(false)
 // const isWordTraining = ref(false) // Removed: Word Training Mode switch
