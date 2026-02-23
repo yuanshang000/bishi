@@ -53,7 +53,7 @@ export const getKnowledgePoints = (chapterId: number) => {
 }
 
 // 生成单词章节训练
-export const generateWordTraining = (data: { subsection_id: number; count: number }) => {
+export const generateWordTraining = (data: { subsection_id: number; count: number; practice_mode?: string }) => {
   return request.post<Quiz>('/quiz/word_training/generate', data)
 }
 

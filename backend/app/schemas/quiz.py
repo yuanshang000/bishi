@@ -40,6 +40,7 @@ class WordTrainingCreate(BaseModel):
     """单词训练创建模式"""
     subsection_id: int = Field(..., description="小目标ID")
     count: int = Field(10, ge=1, le=50, description="题目数量")
+    practice_mode: Optional[str] = Field("subsection", description="练习模式")
 
 
 class ComprehensiveQuizCreate(BaseModel):

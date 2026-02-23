@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.models.subsection import SubSection
 from app.models.knowledge_point import KnowledgePoint
 from app.models.user_word_stats import UserWordStats
+from app.models.user_knowledge_stats import UserKnowledgePointStats
 from app.core.config import settings
 from openai import AsyncOpenAI
 
@@ -35,6 +36,27 @@ class WordTrainingService:
         if kp and kp.type:
             return kp.type
         return "word"
+
+    def get_weak_content_for_subsection(self, db: Session, user_id: int, subsection_id: int) -> List[str]:
+        """
+        获取指定小节中用户的薄弱知识点内容（正确率 < 60%）
+        """
+        # Query stats joined with KnowledgePoint
+        results = db.query(UserKnowledgePointStats, KnowledgePoint).join(
+            KnowledgePoint, UserKnowledgePointStats.knowledge_point_id == KnowledgePoint.id
+        ).filter(
+            UserKnowledgePointStats.user_id == user_id,
+            KnowledgePoint.subsection_id == subsection_id,
+            UserKnowledgePointStats.total_attempts > 0
+        ).all()
+        
+        weak_contents = []
+        for stats, kp in results:
+            accuracy = stats.correct_attempts / stats.total_attempts
+            if accuracy < 0.6:
+                weak_contents.append(kp.content)
+                
+        return weak_contents
 
     def parse_words_from_subsection(self, db: Session, subsection_id: int) -> List[str]:
         subsection = db.query(SubSection).filter(SubSection.id == subsection_id).first()
@@ -222,7 +244,7 @@ class WordTrainingService:
         except Exception as e:
             return {"word": word, "error": str(e), "success": False}
 
-    async def generate_word_quiz(self, db: Session, user_id: int, subsection_id: int, count: int) -> List[Dict[str, Any]]:
+    async def generate_word_quiz(self, db: Session, user_id: int, subsection_id: int, count: int, practice_mode: str = 'subsection') -> List[Dict[str, Any]]:
         # 1. Determine type
         kp_type = self.get_subsection_type(db, subsection_id)
         
@@ -236,34 +258,98 @@ class WordTrainingService:
 
         if kp_type == "grammar":
             # Grammar Logic
-            grammar_data = self.parse_grammar_from_subsection(db, subsection_id)
-            if not grammar_data:
-                raise ValueError("No content found for grammar subsection")
+            weak_contents = []
+            if practice_mode == 'comprehensive':
+                weak_contents = self.get_weak_content_for_subsection(db, user_id, subsection_id)
             
-            templates = self.load_prompt_templates("语法")
-            if not templates:
-                raise ValueError("No valid prompt templates found in ai提示词.txt for [语法]")
-            
-            core = grammar_data["core"]
-            usages = grammar_data["usages"]
-            
-            # Generate 'count' questions
-            for _ in range(count):
-                # Construct content: Core + Random Usage (if any)
-                content_to_use = core
-                if usages:
-                    usage = random.choice(usages)
-                    content_to_use = f"{core}\n{usage}"
+            if weak_contents:
+                # Use weak grammar points
+                templates = self.load_prompt_templates("语法")
+                if not templates:
+                    raise ValueError("No valid prompt templates found in ai提示词.txt for [语法]")
                 
-                tasks.append(bounded_generate(content_to_use, templates))
+                # Generate questions for each weak point (up to count)
+                # If weak points are fewer than count, we might loop or just return fewer?
+                # User probably wants to practice these specifically.
+                # If more weak points than count, sample them?
+                selected_contents = weak_contents
+                if len(selected_contents) > count:
+                    selected_contents = random.sample(selected_contents, count)
+                
+                for content in selected_contents:
+                    tasks.append(bounded_generate(content, templates))
+                    
+                # If we have fewer weak points than count, should we fill up with others?
+                # User said "Recommended training is to train THESE weak points".
+                # So maybe strict adherence is better.
+                
+            else:
+                # Standard Grammar Logic
+                grammar_data = self.parse_grammar_from_subsection(db, subsection_id)
+                if not grammar_data:
+                    # Try to fetch weak points if parsing failed? No, parsing failed means no content.
+                    # But wait, get_weak_content uses KnowledgePoint table.
+                    # If parse_grammar uses subsection.content.
+                    # They should be consistent.
+                    # If comprehensive mode but no weak points found, maybe fallback to standard?
+                    # The 'else' block here handles:
+                    # 1. practice_mode != 'comprehensive'
+                    # 2. practice_mode == 'comprehensive' but no weak points found (fallback)
+                    
+                    if practice_mode == 'comprehensive':
+                         # If specifically asked for comprehensive but no weak points,
+                         # maybe we should just generate random ones from the subsection?
+                         # Or return empty?
+                         # Let's fallback to standard generation to ensure user gets something.
+                         pass
+                    
+                    # Re-check grammar_data if we are here (it might be None if we didn't call parse yet)
+                    if 'grammar_data' not in locals():
+                         grammar_data = self.parse_grammar_from_subsection(db, subsection_id)
+                         
+                if not grammar_data:
+                     raise ValueError("No content found for grammar subsection")
+
+                templates = self.load_prompt_templates("语法")
+                if not templates:
+                    raise ValueError("No valid prompt templates found in ai提示词.txt for [语法]")
+                
+                core = grammar_data["core"]
+                usages = grammar_data["usages"]
+                
+                # Generate 'count' questions
+                for _ in range(count):
+                    # Construct content: Core + Random Usage (if any)
+                    content_to_use = core
+                    if usages:
+                        usage = random.choice(usages)
+                        content_to_use = f"{core}\n{usage}"
+                    
+                    tasks.append(bounded_generate(content_to_use, templates))
                 
         else:
             # Word Logic (Default)
-            words_in_subsection = self.parse_words_from_subsection(db, subsection_id)
-            if not words_in_subsection:
-                raise ValueError("No words found in subsection content")
-                
-            selected_words = self.select_words_for_user(db, user_id, words_in_subsection, count, subsection_id)
+            selected_words = []
+            
+            if practice_mode == 'comprehensive':
+                 weak_words = self.get_weak_content_for_subsection(db, user_id, subsection_id)
+                 if weak_words:
+                     # If we have weak words, use them.
+                     # Sort by some metric? get_weak_content returns list of strings.
+                     # Maybe random sample if too many?
+                     if len(weak_words) > count:
+                         selected_words = random.sample(weak_words, count)
+                     else:
+                         selected_words = weak_words
+            
+            if not selected_words:
+                # Fallback or Standard Mode
+                words_in_subsection = self.parse_words_from_subsection(db, subsection_id)
+                if not words_in_subsection:
+                    raise ValueError("No words found in subsection content")
+                    
+                selected_words = self.select_words_for_user(db, user_id, words_in_subsection, count, subsection_id)
+            
             if not selected_words:
                 raise ValueError("No words available for selection")
 
@@ -278,6 +364,11 @@ class WordTrainingService:
         
         # Filter successful results
         valid_results = [r for r in results if r["success"]]
+        
+        if not valid_results and tasks:
+            # If we had tasks but no valid results, it means all failed.
+            errors = [r.get("error") for r in results if not r.get("success")]
+            raise ValueError(f"Failed to generate questions. Errors: {errors[:1]}")
         
         # Update stats: Increment count for generated words (Only for Word type for now)
         # Or should we track grammar usage? 

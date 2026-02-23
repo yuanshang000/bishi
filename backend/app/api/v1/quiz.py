@@ -92,7 +92,7 @@ async def generate_word_training(
     """
     # 1. Generate questions
     generated_items = await word_training_service.generate_word_quiz(
-        db, current_user.id, data.subsection_id, data.count
+        db, current_user.id, data.subsection_id, data.count, data.practice_mode
     )
     
     # 2. Convert to QuizRecord format
@@ -196,7 +196,7 @@ async def generate_word_training(
     quiz_record = QuizRecord(
         user_id=current_user.id,
         quiz_type=record_quiz_type,
-        practice_mode="subsection",
+        practice_mode=data.practice_mode, # Use passed mode or default 'subsection'
         chapter_id=chapter_id,
         subsection_id=data.subsection_id,
         question_count=len(questions_data),

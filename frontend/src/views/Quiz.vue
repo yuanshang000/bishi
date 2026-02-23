@@ -50,7 +50,7 @@
     </el-dialog>
 
     <!-- 创建练习表单 -->
-    <el-card v-if="!currentQuiz">
+    <el-card v-if="!currentQuiz" class="practice-center-card">
       <template #header>
         <div class="quiz-header">
           <span class="quiz-title">练习中心</span>
@@ -247,7 +247,24 @@
             </el-table-column>
             <el-table-column label="操作" width="120" fixed="right" align="center">
               <template #default="{ row }">
-                <el-button type="primary" link size="default" style="font-size: 15px;" @click="handleViewDetail(row.id)">
+                <el-button 
+                  v-if="row.practice_mode === 'comprehensive' || row.practice_mode === 'subsection'" 
+                  type="primary" 
+                  link 
+                  size="default" 
+                  style="font-size: 15px;" 
+                  @click="handleViewRecommendedDetail(row.id)"
+                >
+                  查看详情
+                </el-button>
+                <el-button 
+                  v-else
+                  type="primary" 
+                  link 
+                  size="default" 
+                  style="font-size: 15px;" 
+                  @click="handleViewDetail(row.id)"
+                >
                   查看详情
                 </el-button>
               </template>
@@ -329,6 +346,56 @@
                        </div>
                     </div>
                  </div>
+              </div>
+           </el-card>
+
+           <!-- 推荐训练薄弱点概览 -->
+           <el-card shadow="hover" v-else-if="quizForm.practice_mode === 'comprehensive'" class="stats-card weak-points-overview">
+              <template #header>
+                <div class="stats-header">
+                   <div class="header-title-group">
+                      <el-icon class="header-icon" color="#E6A23C"><Warning /></el-icon>
+                      <span>薄弱知识点详情</span>
+                   </div>
+                </div>
+              </template>
+              <div class="stats-content">
+                  <div v-if="!weakPointsData || weakPointsData.length === 0" class="empty-state">
+                      <el-empty description="暂无薄弱点数据，表现不错！" :image-size="80" />
+                  </div>
+                  <div v-else class="weak-points-list">
+                      <el-collapse accordion>
+                          <el-collapse-item v-for="(wp, index) in weakPointsData" :key="index" :name="index">
+                              <template #title>
+                                  <div class="wp-header">
+                                      <span class="wp-title">{{ wp.knowledge_point_id }}</span>
+                                      <el-tag :type="getSeverityType(wp.severity)" size="small" effect="plain" style="margin-left: auto;">
+                                          {{ getSeverityText(wp.severity) }}
+                                      </el-tag>
+                                  </div>
+                              </template>
+                              <div class="wp-details">
+                                  <div class="wp-stat-row">
+                                      <span>平均分: <span :style="{ color: getScoreColor(wp.average_score) }">{{ wp.average_score }}</span></span>
+                                      <span>薄弱点: {{ wp.weak_details ? wp.weak_details.length : 0 }}个</span>
+                                  </div>
+                                  
+                                  <div v-if="wp.weak_details && wp.weak_details.length > 0" class="detail-list">
+                                      <div v-for="(detail, idx) in wp.weak_details" :key="idx" class="detail-item">
+                                          <div class="detail-content">
+                                              <span class="detail-name">{{ detail.knowledge_point_id }}</span>
+                                              <el-tag size="small">{{ detail.type }}</el-tag>
+                                          </div>
+                                          <div class="detail-metrics">
+                                              <span>正确率: <span :style="{ color: getScoreColor(detail.accuracy) }">{{ detail.accuracy }}%</span></span>
+                                              <span>错: {{ detail.error_count }}</span>
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                          </el-collapse-item>
+                      </el-collapse>
+                  </div>
               </div>
            </el-card>
 
@@ -1008,17 +1075,275 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 推荐训练历史练习详情对话框 (独立) -->
+    <el-dialog v-model="showRecommendedHistoryDetail" title="推荐训练详情" width="1000px" :close-on-click-modal="false" class="recommended-detail-dialog">
+      <div v-if="recommendedHistoryDetail">
+        <!-- 练习基本信息 -->
+        <el-descriptions :column="3" border style="margin-bottom: 20px;">
+          <el-descriptions-item label="题型">
+            <el-tag :type="getQuizTypeTagType(recommendedHistoryDetail.quiz_type)">
+              {{ getQuizTypeLabel(recommendedHistoryDetail.quiz_type) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="分数">
+            <span :style="{ color: recommendedHistoryDetail.score >= 60 ? '#67C23A' : '#F56C6C', fontWeight: 'bold', fontSize: '18px' }">
+              {{ recommendedHistoryDetail.score.toFixed(1) }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="正确率">
+            {{ recommendedHistoryDetail.accuracy.toFixed(1) }}%
+          </el-descriptions-item>
+          <el-descriptions-item label="题目数量">
+            {{ recommendedHistoryDetail.question_count }}
+          </el-descriptions-item>
+          <el-descriptions-item label="用时">
+            {{ recommendedHistoryDetail.time_spent }}秒
+          </el-descriptions-item>
+          <el-descriptions-item label="完成时间">
+            {{ recommendedHistoryDetail.completed_at ? formatDate(recommendedHistoryDetail.completed_at) : '未完成' }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 题目和答题情况 -->
+        <el-divider content-position="left">
+          <h3>答题详情 (推荐训练)</h3>
+        </el-divider>
+
+        <div v-if="!recommendedHistoryDetail.is_completed" class="not-completed-hint">
+          <el-alert type="info" :closable="false">
+            此练习尚未完成，仅显示题目信息
+          </el-alert>
+        </div>
+
+        <div v-for="(q, index) in recommendedHistoryQuestions" :key="index" class="history-question-item recommended-item">
+          <h4 class="question-title">
+            <span class="question-number">{{ index + 1 }}.</span>
+            <!-- 综合训练显示题型标签 -->
+            <el-tag v-if="recommendedHistoryDetail.practice_mode === 'comprehensive' || recommendedHistoryDetail.quiz_type === 'mixed'" :type="getQuizTypeTagType(q.quiz_type)" size="small" style="margin-right: 10px">
+              {{ getQuizTypeLabel(q.quiz_type) }}
+            </el-tag>
+            {{ q.question_text || q.question }}
+            <el-tag
+              v-if="recommendedHistoryDetail.is_completed && recommendedHistoryUserAnswers[index] !== undefined"
+              :type="isRecommendedHistoryAnswerCorrect(index) ? 'success' : 'danger'"
+              size="small"
+              style="margin-left: 10px;"
+            >
+              {{ isRecommendedHistoryAnswerCorrect(index) ? '✓ 正确' : '✗ 错误' }}
+            </el-tag>
+          </h4>
+
+          <div v-if="q.meta" class="meta-info-box">
+             <el-descriptions :column="1" size="small" border class="meta-descriptions">
+                <el-descriptions-item label="🎯 出题知识">
+                   <el-collapse accordion style="border: none;">
+                      <el-collapse-item title="点击查看知识点内容" name="1">
+                         <div class="knowledge-content">{{ q.meta.word }}</div>
+                      </el-collapse-item>
+                   </el-collapse>
+                </el-descriptions-item>
+                <el-descriptions-item label="🤖 AI提示词">
+                   <el-collapse accordion style="border: none;">
+                      <el-collapse-item title="点击查看完整提示词" name="1">
+                         <div class="prompt-content">{{ q.meta.prompt }}</div>
+                      </el-collapse-item>
+                   </el-collapse>
+                </el-descriptions-item>
+             </el-descriptions>
+          </div>
+
+          <!-- 通用音频播放器 (支持听力题、听写题等) -->
+          <div v-if="q.audio_url || q.audio_text" class="audio-player-box" style="margin-bottom: 15px;">
+             <div v-if="q.audio_url">
+                <h5>🎧 听力音频：</h5>
+                <audio controls :src="getAudioUrl(q.audio_url)" class="audio-player">
+                  您的浏览器不支持音频播放。
+                </audio>
+             </div>
+             <!-- 降级方案：如果没有音频URL，显示音频文本 -->
+             <div v-else-if="q.audio_text" class="audio-text-box">
+                <h5>听力材料：</h5>
+                <p>{{ q.audio_text }}</p>
+             </div>
+          </div>
+
+          <!-- 听力、阅读、选择、词汇 -->
+          <div v-if="['listening', 'reading', 'choice', 'vocabulary'].includes(getQuestionType(q, recommendedHistoryDetail.quiz_type))" class="answer-display">
+            <!-- 听力题显示音频播放器 (已移至通用显示区域，此处移除以免重复) -->
+            <!-- 阅读题显示阅读材料 -->
+            <div v-if="getQuestionType(q, recommendedHistoryDetail.quiz_type) === 'reading' && q.passage" class="passage-box">
+              <h5>阅读材料：</h5>
+              <p>{{ q.passage }}</p>
+            </div>
+            
+            <!-- 选择题选项显示 (单选/字典格式选项) -->
+            <div v-if="q.options && !Array.isArray(q.options)">
+              <div v-for="(optText, optKey) in q.options" :key="optKey" class="option-item">
+                <span :class="['option-label', {
+                  'correct-option': optKey === q.correct_answer,
+                  'user-option': recommendedHistoryDetail.is_completed && optKey === recommendedHistoryUserAnswers[index],
+                  'wrong-option': recommendedHistoryDetail.is_completed && optKey === recommendedHistoryUserAnswers[index] && optKey !== q.correct_answer
+                }]">
+                  <span class="option-key-history">{{ getOptionLabel(optKey) }}.</span>
+                  <span class="option-text-history">{{ optText }}</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- 听力多选结果显示 (列表格式选项) -->
+            <div v-else-if="getQuestionType(q, recommendedHistoryDetail.quiz_type) === 'listening' && Array.isArray(q.options)" class="listening-result-box">
+              <div class="result-item">
+                <p class="label"><strong>你的选择：</strong></p>
+                <div class="word-list">
+                  <el-tag 
+                    v-for="(word, i) in (Array.isArray(recommendedHistoryUserAnswers[index]) ? recommendedHistoryUserAnswers[index] : [])" 
+                    :key="i"
+                    :type="q.correct_answer.includes(word) ? 'success' : 'danger'"
+                    style="margin-right: 5px; margin-bottom: 5px;"
+                  >
+                    {{ word }}
+                  </el-tag>
+                  <span v-if="!recommendedHistoryUserAnswers[index] || recommendedHistoryUserAnswers[index].length === 0">未作答</span>
+                </div>
+              </div>
+              <div class="result-item" style="margin-top: 15px;">
+                <p class="label"><strong>正确答案：</strong></p>
+                <div class="word-list">
+                   <el-tag 
+                    v-for="(word, i) in q.correct_answer" 
+                    :key="i"
+                    type="success"
+                    effect="dark"
+                    style="margin-right: 5px; margin-bottom: 5px;"
+                  >
+                    {{ word }}
+                  </el-tag>
+                </div>
+              </div>
+            </div>
+
+            <!-- 详细评语和分数 (如有) -->
+            <div v-if="recommendedHistoryResults[index] && (recommendedHistoryResults[index].feedback || recommendedHistoryResults[index].score !== undefined)" class="feedback-section" style="margin-top: 15px; padding-top: 10px; border-top: 1px dashed #eee;">
+               <div v-if="recommendedHistoryResults[index].feedback" class="feedback-box">
+                  <strong>详细评语：</strong>
+                  <div class="feedback-text">{{ recommendedHistoryResults[index].feedback }}</div>
+               </div>
+            </div>
+          </div>
+
+          <!-- 填空题 (默写/单词训练) -->
+          <div v-else-if="['blank', 'word_training', 'fill_in_the_blank', 'dictation', 'spelling'].includes(getQuestionType(q, recommendedHistoryDetail.quiz_type))" class="answer-display">
+              <div v-if="recommendedHistoryDetail.is_completed">
+                  <p><strong>你的答案：</strong>
+                    <span :class="{'text-success': isRecommendedHistoryAnswerCorrect(index), 'text-danger': !isRecommendedHistoryAnswerCorrect(index)}" style="font-weight: bold;">
+                        {{ recommendedHistoryUserAnswers[index] || '未作答' }}
+                    </span>
+                  </p>
+                  <p><strong>正确答案：</strong><span class="text-success" style="font-weight: bold;">{{ q.correct_answer }}</span></p>
+                  
+                  <!-- 详细评语 -->
+                  <div v-if="recommendedHistoryResults[index] && recommendedHistoryResults[index].feedback" class="feedback-box" style="margin-top: 10px;">
+                      <strong>详细评语：</strong>
+                      <div class="feedback-text">{{ recommendedHistoryResults[index].feedback }}</div>
+                  </div>
+              </div>
+              <div v-else>
+                  <p><strong>正确答案：</strong>{{ q.correct_answer }}</p>
+              </div>
+          </div>
+
+          <!-- 翻译题 -->
+          <div v-else-if="getQuestionType(q, recommendedHistoryDetail.quiz_type) === 'translation'" class="answer-display">
+            <div v-if="q.key_points && q.key_points.length > 0" class="key-points-box">
+              <h5>翻译要点：</h5>
+              <ul>
+                <li v-for="(point, i) in q.key_points" :key="i">{{ point }}</li>
+              </ul>
+            </div>
+            <div v-if="recommendedHistoryDetail.is_completed">
+              <p><strong>你的翻译：</strong>{{ recommendedHistoryUserAnswers[index] || '未作答' }}</p>
+              <p><strong>参考翻译：</strong>{{ q.correct_answer }}</p>
+            </div>
+            <div v-else>
+              <p><strong>参考翻译：</strong>{{ q.correct_answer }}</p>
+            </div>
+          </div>
+
+          <!-- 写作题 -->
+          <div v-else-if="getQuestionType(q, recommendedHistoryDetail.quiz_type) === 'writing'" class="answer-display">
+            <div class="writing-requirements">
+              <h5>写作要求：</h5>
+              <ul>
+                <li v-for="(req, i) in q.requirements" :key="i">{{ req }}</li>
+              </ul>
+              <p><strong>字数要求：</strong>{{ q.word_count }}</p>
+              <p v-if="q.reference_outline"><strong>参考提纲：</strong>{{ q.reference_outline }}</p>
+            </div>
+            <div v-if="recommendedHistoryDetail.is_completed">
+              <p><strong>你的作文：</strong></p>
+              <div class="user-writing">{{ recommendedHistoryUserAnswers[index] || '未作答' }}</div>
+
+              <!-- 显示评分和反馈 -->
+              <div v-if="recommendedHistoryResults[index]" style="margin-top: 20px;">
+                <el-divider />
+                <div style="margin-bottom: 15px;">
+                  <el-tag :type="recommendedHistoryResults[index].is_correct ? 'success' : 'warning'" size="large">
+                    得分: {{ (recommendedHistoryResults[index].score * 100).toFixed(0) }}分
+                  </el-tag>
+                </div>
+                <div v-if="recommendedHistoryResults[index].feedback" class="feedback-box">
+                  <strong>详细评语：</strong>
+                  <pre class="feedback-text">{{ recommendedHistoryResults[index].feedback }}</pre>
+                </div>
+              </div>
+
+              <!-- 显示参考范文 -->
+              <div v-if="q.sample_essay || q.correct_answer" style="margin-top: 20px;">
+                <p><strong>参考范文：</strong></p>
+                <div class="sample-essay">{{ q.sample_essay || q.correct_answer }}</div>
+              </div>
+            </div>
+            <div v-else>
+              <!-- 未完成时也显示参考范文 -->
+              <div v-if="q.sample_essay || q.correct_answer">
+                <p><strong>参考范文：</strong></p>
+                <div class="sample-essay">{{ q.sample_essay || q.correct_answer }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 答案解析 - 分离显示答案解析和音频文本 -->
+          <div v-if="q.explanation">
+            <div v-if="q.explanation.includes('**音频文本：**')">
+              <!-- 听力题：分离显示答案解析和音频文本 -->
+              <div class="explanation-box">
+                <strong>解析：</strong>{{ q.explanation.split('**音频文本：**')[0].trim() }}
+              </div>
+              <div class="audio-text-explanation">
+                <strong>📝 音频文本：</strong>
+                <pre class="audio-text-content">{{ q.explanation.split('**音频文本：**')[1].trim() }}</pre>
+              </div>
+            </div>
+            <!-- 其他题型：正常显示 -->
+            <div v-else class="explanation-box">
+              <strong>解析：</strong>{{ q.explanation }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { createSectionComprehensiveQuiz, createComprehensiveQuiz, createPersonalizedQuiz, createQuiz, generateWordTraining, getMyLearningAnalysis, getQuiz, getQuizHistory, submitQuiz, getSubsectionStats, getQuizStats } from '@/api'
+import { createPersonalizedQuiz, createQuiz, createSectionComprehensiveQuiz, generateWordTraining, getMyLearningAnalysis, getQuiz, getQuizHistory, getQuizStats, getSubsectionStats, submitQuiz } from '@/api'
 import { useChapterStore } from '@/stores'
-import { Loading, Timer, Trophy, DataAnalysis } from '@element-plus/icons-vue'
-import { ElMessage, ElNotification } from 'element-plus'
-import { computed, onMounted, onUnmounted, reactive, ref, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { DataAnalysis, Loading, Timer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { ElMessage, ElNotification } from 'element-plus'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const chapterStore = useChapterStore()
@@ -1028,6 +1353,7 @@ const submitting = ref(false)
 const showResult = ref(false)
 const showDetailedResults = ref(false)
 const showHistoryDetail = ref(false)
+const showRecommendedHistoryDetail = ref(false) // 推荐训练独立详情弹窗
 const currentQuiz = ref<any>(null)
 const questions = ref<any[]>([])
 const userAnswers = ref<any[]>([])
@@ -1039,6 +1365,13 @@ const historyQuestions = ref<any[]>([])
 const historyUserAnswers = ref<any[]>([])
 const historyCorrectAnswers = ref<any[]>([])
 const historyResults = ref<any[]>([])  // 详细批改结果
+
+// 推荐训练独立的状态变量
+const recommendedHistoryDetail = ref<any>(null)
+const recommendedHistoryQuestions = ref<any[]>([])
+const recommendedHistoryUserAnswers = ref<any[]>([])
+const recommendedHistoryCorrectAnswers = ref<any[]>([])
+const recommendedHistoryResults = ref<any[]>([])
 const loadingText = ref('正在出题中...')
 const loadingSubText = ref('AI正在为你精心准备题目，请稍候')
 const loadingProgress = ref(0)
@@ -1050,6 +1383,7 @@ let timer: any = null
 
 const subsectionStats = ref<any>(null)
 const overallStats = ref<any>(null)
+const weakPointsData = ref<any[]>([]) // 新增：薄弱知识点数据
 const selectedStatsChapter = ref<number | null>(null) // 新增：用于统计卡片的章节选择
 const gaugeChartRef = ref<HTMLElement | null>(null)
 let gaugeChart: echarts.ECharts | null = null
@@ -1196,6 +1530,52 @@ const fetchOverallStats = async (explicitChapterId?: number) => {
 const handleStatsChapterChange = (val: any) => {
   console.log('Chapter changed to:', val)
   fetchOverallStats(val)
+}
+
+// 获取薄弱知识点数据（用于推荐训练）
+const fetchWeakPointsData = async () => {
+  try {
+    const res: any = await getMyLearningAnalysis()
+    if (res && res.data && res.data.weak_points) {
+      weakPointsData.value = res.data.weak_points
+    } else {
+      weakPointsData.value = []
+    }
+  } catch (e) {
+    console.error('Failed to fetch weak points:', e)
+    weakPointsData.value = []
+  }
+}
+
+// 获取分数颜色
+const getScoreColor = (score: number): string => {
+  if (score >= 80) return '#67C23A'
+  if (score >= 60) return '#E6A23C'
+  return '#F56C6C'
+}
+
+// 获取严重程度类型
+const getSeverityType = (severity: string): 'danger' | 'warning' | 'success' => {
+  switch (severity) {
+    case 'high':
+      return 'danger'
+    case 'medium':
+      return 'warning'
+    default:
+      return 'success'
+  }
+}
+
+// 获取严重程度文本
+const getSeverityText = (severity: string): string => {
+  switch (severity) {
+    case 'high':
+      return '严重'
+    case 'medium':
+      return '中等'
+    default:
+      return '轻微'
+  }
 }
 
 const initGaugeChart = (score: number, title: string, passingScore: number = 60) => {
@@ -1578,30 +1958,73 @@ const handleCreateQuiz = async () => {
 
     // 🔥 综合练习：调用专门的综合练习接口
     if (quizForm.practice_mode === 'comprehensive') {
-      // 先获取AI学情分析数据
-      loadingText.value = '正在获取学情数据...'
-      const analysisRes: any = await getMyLearningAnalysis()
+      // 1. Ensure we have weak points data
+      if (weakPointsData.value.length === 0) {
+        loadingText.value = '正在获取学情数据...'
+        await fetchWeakPointsData()
+      }
 
-      if (!analysisRes || !analysisRes.data || analysisRes.data.status === 'no_data') {
-        ElMessage.warning('暂无学习数据，请先完成一些章节练习后再使用推荐训练')
+      if (weakPointsData.value.length === 0) {
+        ElMessage.warning('暂无薄弱点数据，请先完成一些章节练习')
+        creating.value = false
         return
       }
 
-      const weakPoints = analysisRes.data.weak_points || []
+      // 2. Randomly select one weak point
+      const randomIndex = Math.floor(Math.random() * weakPointsData.value.length)
+      const selectedWP = weakPointsData.value[randomIndex]
+      console.log('Selected Weak Point for Training:', selectedWP)
 
-      if (weakPoints.length === 0) {
-        ElMessage.warning('恭喜！目前没有薄弱点，建议进行章节练习或综合训练')
-        return
+      // 3. Find corresponding subsection_id
+      let targetSubsectionId: number | undefined = undefined
+      
+      // Helper to find subsection
+      // We iterate through the chapter store to find a subsection that matches the weak point title
+      const findSubsection = (wpTitle: string) => {
+         if (!chapterStore.chapters) return undefined
+         
+         for (const chapter of chapterStore.chapters) {
+            if (chapter.sections) {
+               for (const section of chapter.sections) {
+                  if (section.subsections) {
+                     for (const sub of section.subsections) {
+                        // Check if wpTitle contains sub.title
+                        // wpTitle format is typically "第X章 - X.X.X Title"
+                        // sub.title is typically "X.X.X Title"
+                        if (wpTitle.includes(sub.title)) {
+                           return sub.id
+                        }
+                     }
+                  }
+               }
+            }
+         }
+         return undefined
       }
 
-      // 调用综合练习API
-      loadingText.value = '正在生成推荐训练...'
-      loadingSubText.value = `根据 ${weakPoints.length} 个薄弱点生成针对性题目`
+      targetSubsectionId = findSubsection(selectedWP.knowledge_point_id)
 
-      res = await createComprehensiveQuiz({
-        weak_points: weakPoints,
-        question_count: quizForm.question_count
+      if (!targetSubsectionId) {
+         console.warn('Could not find subsection for weak point:', selectedWP.knowledge_point_id)
+         // Fallback: try to just pick a random subsection if strict matching fails? 
+         // Or just show error. User said "Randomly select... contents...". 
+         // If we can't find content, we can't generate.
+         ElMessage.warning(`无法找到薄弱点 "${selectedWP.knowledge_point_id}" 对应的练习内容，请尝试其他模式`)
+         creating.value = false
+         return
+      }
+
+      // 4. Call generation API (Using the same logic as Chapter Training - generateWordTraining)
+      // This ensures we use the subsection's content and AI prompts
+      loadingText.value = '正在生成针对性训练...'
+      loadingSubText.value = `AI正在根据薄弱点 "${selectedWP.knowledge_point_id}" 准备题目`
+      
+      res = await generateWordTraining({
+         subsection_id: targetSubsectionId,
+         count: quizForm.question_count,
+         practice_mode: 'comprehensive'
       })
+
     } else if (quizForm.practice_mode === 'random') {
        // Comprehensive Training (Section based) Logic
        res = await createSectionComprehensiveQuiz({
@@ -1795,7 +2218,9 @@ const handleSubmit = async () => {
     fetchHistory()
     
     // 更新统计数据
-    if (quizForm.practice_mode === 'chapter' && quizForm.subsection_id) {
+    if (quizForm.practice_mode === 'comprehensive') {
+        fetchWeakPointsData()
+    } else if (quizForm.practice_mode === 'chapter' && quizForm.subsection_id) {
         // 如果是章节练习且选择了小节，更新小节统计
         fetchSubsectionStatsData(quizForm.subsection_id)
     } else {
@@ -1931,8 +2356,10 @@ watch(() => quizForm.practice_mode, (newMode) => {
   // 综合训练不显示统计
   if (newMode === 'random') {
     overallStats.value = null
-  } else {
+  } else if (newMode === 'chapter') {
     fetchOverallStats()
+  } else if (newMode === 'comprehensive') {
+    fetchWeakPointsData()
   }
 })
 
@@ -1999,6 +2426,49 @@ const getOptionLabel = (key: string | number) => {
     }
   }
   return key;
+}
+
+const handleViewRecommendedDetail = async (quizId: number) => {
+  try {
+    const res: any = await getQuiz(quizId)
+    recommendedHistoryDetail.value = res
+
+    // 解析题目
+    recommendedHistoryQuestions.value = Array.isArray(res.questions)
+      ? res.questions
+      : JSON.parse(res.questions || '[]')
+
+    // 解析用户答案
+    if (res.user_answers) {
+      recommendedHistoryUserAnswers.value = Array.isArray(res.user_answers)
+        ? res.user_answers
+        : JSON.parse(res.user_answers || '[]')
+    } else {
+      recommendedHistoryUserAnswers.value = []
+    }
+
+    // 解析正确答案
+    if (res.correct_answers) {
+      recommendedHistoryCorrectAnswers.value = Array.isArray(res.correct_answers)
+        ? res.correct_answers
+        : JSON.parse(res.correct_answers || '[]')
+    } else {
+      recommendedHistoryCorrectAnswers.value = []
+    }
+
+    // 解析详细结果
+    if (res.results) {
+      recommendedHistoryResults.value = Array.isArray(res.results)
+        ? res.results
+        : JSON.parse(res.results || '[]')
+    } else {
+      recommendedHistoryResults.value = []
+    }
+
+    showRecommendedHistoryDetail.value = true
+  } catch (error: any) {
+    ElMessage.error(error.message || '获取练习详情失败')
+  }
 }
 
 const handleViewDetail = async (quizId: number) => {
@@ -2084,6 +2554,53 @@ const isHistoryAnswerCorrect = (index: number) => {
     // 如果没有结果数据，fallback 到 is_correct 字段
     if (historyResults.value && historyResults.value[index]) {
       return historyResults.value[index].is_correct
+    }
+  }
+
+  // 其他情况：简单比较字符串
+  return JSON.stringify(userAnswer) === JSON.stringify(correctAnswer)
+}
+
+const isRecommendedHistoryAnswerCorrect = (index: number) => {
+  if (!recommendedHistoryDetail.value.is_completed) return false
+
+  const userAnswer = recommendedHistoryUserAnswers.value[index]
+  const correctAnswer = recommendedHistoryCorrectAnswers.value[index]
+  const question = recommendedHistoryQuestions.value[index]
+
+  // 获取题目的实际类型
+  const questionType = getQuestionType(question, recommendedHistoryDetail.value.quiz_type)
+
+  if (questionType === 'listening') {
+     // 听力题：数组比较（忽略顺序）
+     if (Array.isArray(userAnswer) && Array.isArray(correctAnswer)) {
+         if (userAnswer.length !== correctAnswer.length) return false
+         const sortedUser = [...userAnswer].sort()
+         const sortedCorrect = [...correctAnswer].sort()
+         return sortedUser.every((val, i) => val === sortedCorrect[i])
+     }
+     // 单选模式：直接比较
+     return String(userAnswer).toUpperCase() === String(correctAnswer).toUpperCase()
+  }
+
+  if (questionType === 'reading' || questionType === 'vocabulary') {
+    // 选择题：直接比较
+    return String(userAnswer).toUpperCase() === String(correctAnswer).toUpperCase()
+  }
+
+  // 对于翻译和写作，基于分数判断
+  if (questionType === 'translation' || questionType === 'writing') {
+    // 从 recommendedHistoryResults 中获取该题的分数
+    if (recommendedHistoryResults.value && recommendedHistoryResults.value[index]) {
+      const result = recommendedHistoryResults.value[index]
+      // score 是 0-1 的浮点数，转换为百分制
+      const scorePercent = result.score * 100
+      // 60分及以上算正确
+      return scorePercent >= 60
+    }
+    // 如果没有结果数据，fallback 到 is_correct 字段
+    if (recommendedHistoryResults.value && recommendedHistoryResults.value[index]) {
+      return recommendedHistoryResults.value[index].is_correct
     }
   }
 
@@ -3180,4 +3697,150 @@ const getQuestionTypes = (quizRecord: any) => {
   align-items: center;
 }
 
+/* Weak Points Overview Styles */
+.weak-points-overview .stats-content {
+  padding: 0;
+}
+
+.weak-points-list {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.wp-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding-right: 10px;
+}
+
+.wp-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 65%;
+  margin-right: 10px;
+}
+
+.wp-details {
+  padding: 10px;
+  background-color: #f8f9fa;
+}
+
+.wp-stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #606266;
+  border-bottom: 1px solid #ebeef5;
+  padding-bottom: 8px;
+}
+
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-item {
+  background-color: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.detail-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.detail-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 75%;
+}
+
+.detail-metrics {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #909399;
+}
+
+.empty-state {
+  padding: 40px 0;
+  display: flex;
+  justify-content: center;
+}
+
+/* Custom layout for Practice Center */
+.quiz-container {
+  height: calc(100vh - 84px); /* Adjust for header height */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.practice-center-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-bottom: 0 !important;
+}
+
+.practice-center-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+/* Ensure the row takes remaining height */
+.practice-center-card .el-row {
+  flex: 1;
+  overflow: hidden;
+  margin-bottom: 0 !important;
+  height: 100%;
+}
+
+/* Ensure columns are full height and handle scrolling */
+.practice-center-card .el-col {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Left column: Practice History */
+.practice-center-card .el-col:first-child {
+  padding-right: 10px; /* Add some spacing if gutter isn't enough */
+}
+
+/* Right column: Stats/Overview */
+.practice-center-card .el-col:last-child {
+  overflow-y: auto;
+  padding-right: 5px; /* Add padding for scrollbar */
+}
+
+/* Make table scrollable */
+.practice-center-card .el-table {
+  flex: 1;
+  height: 0 !important; /* Allow flex to control height */
+}
+
+/* Ensure stats cards fit or scroll */
+.practice-center-card .stats-card {
+  margin-bottom: 20px;
+}
 </style>
