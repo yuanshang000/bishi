@@ -53,7 +53,8 @@ async def get_goal_progress(
 
 @router.get("/analysis/my-learning")
 async def analyze_my_learning(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     AI 分析我的学习情况
@@ -66,7 +67,7 @@ async def analyze_my_learning(
     """
     try:
         # 调用 AI 分析服务
-        analysis = await ai_analysis_service.analyze_student_performance(current_user.id)
+        analysis = await ai_analysis_service.analyze_student_performance(current_user.id, db)
 
         # 生成可读报告
         report = ai_analysis_service.generate_analysis_report(analysis)

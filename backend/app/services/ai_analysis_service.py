@@ -11,10 +11,14 @@ import asyncio
 from typing import Dict, List, Any
 import logging
 from sqlalchemy.orm import Session
+import json
 from app.models.chapter import Chapter
 from app.models.section import Section
 from app.models.subsection import SubSection
 from app.models.quiz import QuizRecord
+from app.models.knowledge_point import KnowledgePoint
+from sqlalchemy.orm import joinedload
+from sqlalchemy import func
 
 # 添加 mcp_server 到 Python 路径
 mcp_server_path = os.path.join(os.path.dirname(__file__), '../../mcp_server')
@@ -49,21 +53,24 @@ class AIAnalysisService:
             QuizRecord.is_completed == 1
         ).all()
         
-        # 3. Aggregate stats by subsection_id
+        # 3. Aggregate stats by subsection_id (using accuracy)
         subsection_stats = {}
         for r in records:
             if r.subsection_id:
                 sid = r.subsection_id
                 if sid not in subsection_stats:
-                    subsection_stats[sid] = {"total_score": 0, "count": 0, "max_score": 0}
+                    subsection_stats[sid] = {"total_accuracy": 0, "count": 0, "max_accuracy": 0}
                 
-                subsection_stats[sid]["total_score"] += r.score
+                # Use accuracy (0-100) for analysis
+                acc = r.accuracy if r.accuracy is not None else 0
+                subsection_stats[sid]["total_accuracy"] += acc
                 subsection_stats[sid]["count"] += 1
-                subsection_stats[sid]["max_score"] = max(subsection_stats[sid]["max_score"], r.score)
+                subsection_stats[sid]["max_accuracy"] = max(subsection_stats[sid]["max_accuracy"], acc)
         
         # 4. Build hierarchy with stats
         result = []
         for chapter in chapters:
+            chapter_has_practice = False
             chapter_data = {
                 "id": chapter.id,
                 "title": chapter.title,
@@ -84,82 +91,37 @@ class AIAnalysisService:
                 sorted_subsections = sorted(section.subsections, key=lambda s: s.order or 0)
                 
                 for subsection in sorted_subsections:
-                    stats = subsection_stats.get(subsection.id, {"total_score": 0, "count": 0, "max_score": 0})
-                    # Score is typically 0-100 in QuizRecord based on previous code
-                    # But QuizRecord.score is Float, default 0.0. 
-                    # If it's percentage, it might be 85.5. If it's 0-1, it might be 0.855.
-                    # In analyze_student_performance: question_score = result_item.get("score", 0.0) * 100
-                    # Let's assume QuizRecord.score is the total score of the quiz.
-                    # If the quiz has 5 questions, max score is 5? Or is it normalized to 100?
-                    # In quiz_service.py: quiz_record.score = total_score (sum of question scores)
-                    # And accuracy is 0-100.
-                    # Let's use accuracy for "score" visualization if available, or normalize score.
-                    # Actually, let's just use the `max_score` achieved if it's stored as percentage, 
-                    # OR calculate average accuracy.
-                    
-                    # Let's re-examine QuizRecord.score in quiz_service.py.
-                    # It seems score is sum of individual question scores.
-                    # Ideally we want the "Grade" (0-100). 
-                    # QuizRecord has `accuracy` field (0-100). Let's use that.
-                    
-                    pass
-                
-        # Let's rewrite the aggregation loop to use accuracy
-        subsection_stats = {}
-        for r in records:
-            if r.subsection_id:
-                sid = r.subsection_id
-                if sid not in subsection_stats:
-                    subsection_stats[sid] = {"total_accuracy": 0, "count": 0, "max_accuracy": 0}
-                
-                subsection_stats[sid]["total_accuracy"] += r.accuracy
-                subsection_stats[sid]["count"] += 1
-                subsection_stats[sid]["max_accuracy"] = max(subsection_stats[sid]["max_accuracy"], r.accuracy)
-
-        # Continue building hierarchy
-        result = []
-        for chapter in chapters:
-            chapter_data = {
-                "id": chapter.id,
-                "title": chapter.title,
-                "chapter_number": chapter.chapter_number,
-                "sections": []
-            }
-            sorted_sections = sorted(chapter.sections, key=lambda s: s.order or 0)
-            
-            for section in sorted_sections:
-                section_data = {
-                    "id": section.id,
-                    "title": section.title,
-                    "order": section.order,
-                    "subsections": []
-                }
-                sorted_subsections = sorted(section.subsections, key=lambda s: s.order or 0)
-                
-                for subsection in sorted_subsections:
                     stats = subsection_stats.get(subsection.id, {"total_accuracy": 0, "count": 0, "max_accuracy": 0})
-                    avg_accuracy = stats["total_accuracy"] / stats["count"] if stats["count"] > 0 else 0
+                    
+                    if stats["count"] > 0:
+                        chapter_has_practice = True
+
+                    average_score = 0
+                    if stats["count"] > 0:
+                        average_score = stats["total_accuracy"] / stats["count"]
                     
                     passing_score = subsection.passing_score or 60
-                    # Use max accuracy as "current level" or average? User said "visualize completion status".
-                    # Usually "highest score" determines if you passed.
-                    current_score = stats["max_accuracy"]
-                    is_passed = current_score >= passing_score
+                    
+                    # 达标逻辑：平均分 >= 及格分
+                    is_passed = average_score >= passing_score
                     
                     subsection_data = {
                         "id": subsection.id,
                         "title": subsection.title,
                         "content": subsection.content,
                         "passing_score": passing_score,
-                        "current_score": round(current_score, 1),
-                        "average_score": round(avg_accuracy, 1),
+                        "current_score": round(stats["max_accuracy"], 1), # 保留最高分供参考
+                        "average_score": round(average_score, 1),
                         "practice_count": stats["count"],
                         "is_passed": is_passed,
                         "weight": subsection.weight
                     }
                     section_data["subsections"].append(subsection_data)
+                section_data["subsections"].sort(key=lambda x: x["id"]) # Optional: ensure consistent order
                 chapter_data["sections"].append(section_data)
-            result.append(chapter_data)
+            
+            if chapter_has_practice:
+                result.append(chapter_data)
             
         return result
 
@@ -228,19 +190,232 @@ class AIAnalysisService:
             logger.error(f"Failed to fetch wrong questions: {e}")
             return {"total_wrong_questions": 0, "wrong_questions": []}
 
-    async def analyze_student_performance(self, student_id: int) -> Dict[str, Any]:
+    async def get_weak_points_detail(self, db: Session, student_id: int) -> List[Dict[str, Any]]:
+        """
+        获取详细的薄弱知识点分析
+        仅包含平均分 < 60 的小节，并列出其中的高频错误知识点
+        """
+        # 1. 获取所有小节的练习统计
+        records = db.query(QuizRecord).filter(
+            QuizRecord.user_id == student_id,
+            QuizRecord.is_completed == 1,
+            QuizRecord.subsection_id.isnot(None)
+        ).all()
+        
+        # 统计小节平均分
+        subsection_stats = {}
+        for r in records:
+            sid = r.subsection_id
+            if sid not in subsection_stats:
+                subsection_stats[sid] = {"total_accuracy": 0, "count": 0}
+            
+            acc = r.accuracy if r.accuracy is not None else 0
+            subsection_stats[sid]["total_accuracy"] += acc
+            subsection_stats[sid]["count"] += 1
+            
+        # 筛选不及格的小节 (< 60)
+        weak_subsections = []
+        for sid, stats in subsection_stats.items():
+            avg_score = stats["total_accuracy"] / stats["count"]
+            if avg_score < 60:
+                weak_subsections.append({
+                    "id": sid,
+                    "avg_score": avg_score
+                })
+        
+        if not weak_subsections:
+            return []
+            
+        # 2. 遍历不及格小节，查询详细错误点
+        results = []
+        for sub_info in weak_subsections:
+            sub_id = sub_info["id"]
+            avg_score = sub_info["avg_score"]
+            
+            # 获取小节信息
+            subsection = db.query(SubSection).options(
+                joinedload(SubSection.section).joinedload(Section.chapter)
+            ).filter(SubSection.id == sub_id).first()
+            
+            if not subsection:
+                continue
+                
+            chapter_num = subsection.section.chapter.chapter_number if subsection.section and subsection.section.chapter else "?"
+            
+            # 查询该小节下的薄弱知识点
+            # 策略：查询 KnowledgePoint 表，按错误率或连续错误次数排序
+            kps = db.query(KnowledgePoint).filter(
+                KnowledgePoint.subsection_id == sub_id,
+                KnowledgePoint.total_attempts > 0 # 只有做过的才统计
+            ).all()
+            
+            # 计算错误率并排序
+            sub_weak_points = []
+            for kp in kps:
+                accuracy = kp.correct_attempts / kp.total_attempts if kp.total_attempts > 0 else 0
+                # 如果正确率低于 60% 或者 连续做错次数 > 0
+                if accuracy < 0.6 or kp.consecutive_errors > 0:
+                    sub_weak_points.append({
+                        "knowledge_point_id": kp.content, # 前端显示用 content
+                        "type": kp.type,
+                        "error_count": kp.total_attempts - kp.correct_attempts,
+                        "accuracy": round(accuracy * 100, 1),
+                        "total_attempts": kp.total_attempts
+                    })
+            
+            # 排序：错误率越低越前
+            sub_weak_points.sort(key=lambda x: x['accuracy'])
+            
+            # 如果 KnowledgePoint 表没有足够数据，尝试从 QuizRecord.questions 中提取错题（作为补充）
+            if not sub_weak_points:
+                try:
+                    # 查找该小节的最近错题记录
+                    wrong_records = db.query(QuizRecord).filter(
+                        QuizRecord.subsection_id == sub_id,
+                        QuizRecord.user_id == student_id,
+                        QuizRecord.score < 60  # 只看低分的记录
+                    ).order_by(QuizRecord.created_at.desc()).limit(5).all()
+                    
+                    for wr in wrong_records:
+                        qs = json.loads(wr.questions) if isinstance(wr.questions, str) else wr.questions
+                        rs = json.loads(wr.results) if isinstance(wr.results, str) else wr.results
+                        
+                        if qs and rs and isinstance(rs, list) and isinstance(qs, list):
+                            for i, res in enumerate(rs):
+                                if i < len(qs) and not res.get("is_correct"):
+                                    q_item = qs[i]
+                                    # 尝试获取题目文本
+                                    q_content = q_item.get("question") or q_item.get("question_text") or "未知题目"
+                                    # 截断过长的题目
+                                    if len(q_content) > 30:
+                                        q_content = q_content[:30] + "..."
+                                    
+                                    sub_weak_points.append({
+                                        "knowledge_point_id": q_content,
+                                        "type": "错题",
+                                        "error_count": 1,
+                                        "accuracy": 0,
+                                        "total_attempts": 1
+                                    })
+                except Exception as e:
+                    logger.warning(f"Failed to extract wrong questions for subsection {sub_id}: {e}")
+            
+            # 生成建议
+            suggestion = "建议加强练习"
+            if sub_weak_points:
+                types = set(wp['type'] for wp in sub_weak_points)
+                if 'word' in types:
+                    suggestion += "，重点记忆单词拼写和词义"
+                if 'grammar' in types:
+                    suggestion += "，复习相关语法规则和例句"
+                if 'phrase' in types:
+                    suggestion += "，注意短语搭配"
+                if '错题' in types:
+                    suggestion += "，回顾错题解析，理解解题思路"
+            else:
+                 suggestion += "，建议重新复习本小节内容，查漏补缺"
+
+            results.append({
+                "knowledge_point_id": f"第{chapter_num}章 - {subsection.title}", # 借用字段名显示标题
+                "average_score": round(avg_score, 1),
+                "accuracy": round(avg_score, 1), # 平均分即正确率
+                "error_count": sum(wp['error_count'] for wp in sub_weak_points), # 总错误次数
+                "total_questions": subsection_stats[sub_id]["count"], # 练习次数
+                "severity": "high", # 既然不及格，就是严重
+                "severity_text": "未达标",
+                "related_chapters": [chapter_num],
+                "weak_details": sub_weak_points[:5], # 具体知识点详情，只取前5个
+                "suggestion": suggestion
+            })
+                
+        return results
+
+    def get_subsection_mastery_stats(self, db: Session, student_id: int) -> List[Dict[str, Any]]:
+        """
+        获取小节掌握程度统计（用于图表）
+        按平均分升序排列，无数据的排在最后
+        """
+        # 1. 获取所有小节信息
+        # 预加载关联关系以避免N+1问题
+        from sqlalchemy.orm import joinedload
+        subsections = db.query(SubSection).options(
+            joinedload(SubSection.section).joinedload(Section.chapter)
+        ).all()
+        
+        # 2. 获取该学生的所有章节练习记录
+        records = db.query(QuizRecord).filter(
+            QuizRecord.user_id == student_id,
+            QuizRecord.is_completed == 1,
+            # QuizRecord.practice_mode == 'chapter', # 移除这个限制，因为可能是综合练习或者其他模式，只要有 subsection_id 就行
+            QuizRecord.subsection_id.isnot(None)
+        ).all()
+        
+        # 3. 统计每个小节的成绩
+        stats = {}
+        for r in records:
+            sid = r.subsection_id
+            if sid not in stats:
+                stats[sid] = {"total_accuracy": 0, "count": 0}
+            
+            # 使用 accuracy (0-100)
+            # 如果 accuracy 为空，尝试用 score 估算 (假设 score 是总分，满分未知，这里暂不估算)
+            accuracy = r.accuracy if r.accuracy is not None else 0
+            stats[sid]["total_accuracy"] += accuracy
+            stats[sid]["count"] += 1
+            
+        # 4. 构建结果列表
+        has_data_list = []
+        no_data_list = []
+        
+        for sub in subsections:
+            # 构建完整的小节名称
+            chapter_num = sub.section.chapter.chapter_number if sub.section and sub.section.chapter else "?"
+            
+            # 使用 Rich Text 格式 (如果前端支持) 或者简单的文本区分
+            # 这里我们返回更详细的结构给前端，让前端决定怎么显示
+            
+            data = {
+                "id": sub.id,
+                "title": sub.title,
+                "chapter_id": sub.section.chapter.id if sub.section and sub.section.chapter else None,
+                "chapter_number": chapter_num,
+                # "full_title": full_title, # 不再使用单一字符串
+                "average_score": 0,
+                "practice_count": 0,
+                "has_data": False
+            }
+            
+            if sub.id in stats:
+                s = stats[sub.id]
+                data["average_score"] = round(s["total_accuracy"] / s["count"], 1)
+                data["practice_count"] = s["count"]
+                data["has_data"] = True
+                has_data_list.append(data)
+            else:
+                data["average_score"] = 0 # 无数据默认为0，但在图表中会显示在最后
+                no_data_list.append(data)
+                
+        # 5. 排序：有数据的按分数升序
+        has_data_list.sort(key=lambda x: x["average_score"])
+        
+        return has_data_list + no_data_list
+
+    async def analyze_student_performance(self, student_id: int, db: Session = None) -> Dict[str, Any]:
         """
         综合分析学生学习表现
 
         Args:
             student_id: 学生ID
+            db: 数据库会话（可选，用于获取更详细的数据库统计）
 
         Returns:
             Dict: 分析结果
         """
         # 获取数据
         learning_data = await self.get_learning_data(student_id, limit=50)  # 增加数据量
-        weak_points_from_errors = await self.get_weak_knowledge_points(student_id, top_k=5)
+        # weak_points_from_errors = await self.get_weak_knowledge_points(student_id, top_k=5)
+        # 使用新的详细薄弱点分析逻辑
+        weak_points_from_errors = await self.get_weak_points_detail(db, student_id) if db else []
 
         # 计算统计数据
         total_records = learning_data["total_records"]
@@ -409,7 +584,7 @@ class AIAnalysisService:
 
 
         # 分析每种题型的表现，找出薄弱点
-        weak_point_analysis = []
+        quiz_type_weak_points = []
 
         # 输出统计结果日志
         logger.info(f"Analysis statistics summary:")
@@ -472,7 +647,7 @@ class AIAnalysisService:
                     severity = "low"
                     severity_text = "轻微"
 
-                weak_point_analysis.append({
+                quiz_type_weak_points.append({
                     "knowledge_point_id": quiz_type_names.get(quiz_type, quiz_type),
                     "quiz_type": quiz_type,
                     "error_count": stats["total_questions"] - stats["correct_count"],  # 错题数
@@ -489,20 +664,22 @@ class AIAnalysisService:
                 })
 
         # 按平均分从低到高排序（最薄弱的在前面）
-        weak_point_analysis.sort(key=lambda x: x["average_score"])
+        quiz_type_weak_points.sort(key=lambda x: x["average_score"])
 
-        # 如果没有基于分数的薄弱点，再看基于错题的薄弱点
-        if not weak_point_analysis and weak_points_from_errors["total_weak_points"] > 0:
-            for wp in weak_points_from_errors["weak_knowledge_points"]:
-                weak_point_analysis.append({
-                    "knowledge_point_id": wp["knowledge_point_id"],
-                    "quiz_type": None,
-                    "error_count": wp["error_count"],
-                    "average_score": None,
-                    "severity": "high" if wp["error_count"] >= 5 else "medium" if wp["error_count"] >= 3 else "low",
-                    "severity_text": "高" if wp["error_count"] >= 5 else "中" if wp["error_count"] >= 3 else "低",
-                    "related_chapters": wp["related_chapters"]
-                })
+        # 最终返回的薄弱点列表：优先使用基于小节的详细薄弱点（weak_points_from_errors）
+        # 如果没有小节薄弱点，可以考虑是否使用题型薄弱点（或者两者都返回？）
+        # 根据需求，前端主要展示小节薄弱点，所以这里直接使用 weak_points_from_errors
+        # 题型薄弱点 (quiz_type_weak_points) 保留在 analysis 对象中供报告生成使用
+        
+        final_weak_points = weak_points_from_errors if weak_points_from_errors else []
+
+        # 获取小节掌握程度（如果提供了db）
+        subsection_mastery = []
+        if db:
+            try:
+                subsection_mastery = self.get_subsection_mastery_stats(db, student_id)
+            except Exception as e:
+                logger.error(f"Failed to get subsection mastery stats: {e}")
 
         return {
             "status": "success",
@@ -511,11 +688,13 @@ class AIAnalysisService:
             "recent_average": round(recent_avg, 2),
             "trend": trend,
             "trend_text": trend_text,
-            "weak_points": weak_point_analysis,
-            "has_weak_points": len(weak_point_analysis) > 0,
+            "weak_points": final_weak_points, # 返回小节维度的薄弱点
+            "quiz_type_weak_points": quiz_type_weak_points, # 返回题型维度的薄弱点（供报告使用）
+            "has_weak_points": len(final_weak_points) > 0,
             "quiz_type_stats": quiz_type_stats,  # 题型统计
             "practice_mode_stats": practice_mode_stats,  # 🔥 新增：练习方式统计
-            "chapter_stats": chapter_stats  # 🔥 新增：章节统计
+            "chapter_stats": chapter_stats,  # 🔥 新增：章节统计
+            "subsection_mastery": subsection_mastery
         }
 
     def generate_analysis_report(self, analysis: Dict[str, Any]) -> str:

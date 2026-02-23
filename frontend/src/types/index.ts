@@ -262,6 +262,14 @@ export interface AIAnalysisResult {
     trend_text: string
     weak_points: WeakKnowledgePointDetail[]
     has_weak_points: boolean
+    subsection_mastery?: Array<{
+        id: number
+        title: string
+        full_title: string
+        average_score: number
+        practice_count: number
+        has_data: boolean
+    }>
   }
 }
 

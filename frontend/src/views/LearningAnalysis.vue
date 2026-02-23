@@ -186,14 +186,8 @@
                           <div class="subsection-content">{{ sub.content }}</div>
                           <div class="subsection-metrics">
                             <div class="metric">
-                              <span class="label">最高得分:</span>
-                              <span class="value" :class="{ pass: sub.is_passed, fail: !sub.is_passed }">
-                                {{ sub.current_score }}
-                              </span>
-                            </div>
-                            <div class="metric">
                               <span class="label">平均得分:</span>
-                              <span class="value">{{ sub.average_score }}</span>
+                              <span class="value" :style="{ color: getScoreColor(sub.average_score) }">{{ sub.average_score }}</span>
                             </div>
                             <div class="metric">
                               <span class="label">及格分:</span>
@@ -212,13 +206,13 @@
                         <div class="subsection-progress">
                           <el-progress 
                             type="dashboard" 
-                            :percentage="Math.min(100, (sub.current_score / 100) * 100)" 
-                            :color="sub.is_passed ? '#67C23A' : '#E6A23C'"
+                            :percentage="Math.min(100, (sub.average_score / 100) * 100)" 
+                            :color="getScoreColor(sub.average_score)"
                             :width="isFullscreen ? 120 : 80"
                             :stroke-width="isFullscreen ? 10 : 6"
                           >
                             <template #default="{ percentage }">
-                              <span class="progress-score">{{ sub.current_score }}</span>
+                              <span class="progress-score">{{ sub.average_score }}</span>
                               <span class="progress-label">分</span>
                             </template>
                           </el-progress>
@@ -241,8 +235,99 @@
             style="margin: 20px 0"
           />
 
+          <!-- 薄弱知识点详情 -->
+          <el-card
+            class="weak-points-card"
+            shadow="hover"
+          >
+            <template #header>
+              <div class="card-header">
+                <div class="header-left">
+                  <el-icon><Warning /></el-icon>
+                  <span>薄弱知识点详情 (未达标小节)</span>
+                </div>
+                <el-button
+                  type="primary"
+                  @click="goToComprehensivePractice"
+                  :icon="Edit"
+                  :disabled="!analysisData.data.has_weak_points"
+                >
+                  去推荐训练
+                </el-button>
+              </div>
+            </template>
+
+            <div v-if="!analysisData.data.has_weak_points || analysisData.data.weak_points.length === 0" class="empty-weak-points">
+                <el-empty description="太棒了！所有已练习小节平均分均≥60分" :image-size="100">
+                    <template #image>
+                        <el-icon :size="100" color="#67C23A"><Medal /></el-icon>
+                    </template>
+                </el-empty>
+            </div>
+
+            <el-table v-else :data="analysisData.data.weak_points" stripe style="width: 100%">
+              <!-- 展开行：显示具体的薄弱知识点 -->
+              <el-table-column type="expand">
+                <template #default="{ row }">
+                  <div style="padding: 10px 20px; background-color: #f8f9fa;">
+                    <h4 style="margin-top: 0; margin-bottom: 10px; color: #606266;">
+                      <el-icon><List /></el-icon> 具体薄弱点 (Top 5)
+                    </h4>
+                    <el-table :data="row.weak_details" border size="small">
+                       <el-table-column prop="knowledge_point_id" label="内容" min-width="180">
+                           <template #default="scope">
+                               <span style="font-weight: bold;">{{ scope.row.knowledge_point_id }}</span>
+                               <el-tag size="small" style="margin-left: 5px">{{ scope.row.type }}</el-tag>
+                           </template>
+                       </el-table-column>
+                       <el-table-column prop="error_count" label="错误次数" width="100" align="center" />
+                       <el-table-column prop="accuracy" label="正确率" width="100" align="center">
+                           <template #default="scope">
+                               <span :style="{ color: getScoreColor(scope.row.accuracy) }">{{ scope.row.accuracy }}%</span>
+                           </template>
+                       </el-table-column>
+                       <el-table-column prop="total_attempts" label="练习总数" width="100" align="center" />
+                    </el-table>
+                    <div style="margin-top: 10px; color: #E6A23C;">
+                        <strong>💡 强化建议：</strong> {{ row.suggestion }}
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <el-table-column prop="knowledge_point_id" label="未达标小节" min-width="200">
+                  <template #default="{ row }">
+                      <span style="font-weight: bold; font-size: 15px;">{{ row.knowledge_point_id }}</span>
+                  </template>
+              </el-table-column>
+              
+              <el-table-column label="小节平均分" width="120" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.average_score !== null" :style="{ color: getScoreColor(row.average_score) }">
+                    {{ row.average_score }} 分
+                  </span>
+                  <span v-else style="color: #909399">-</span>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="薄弱点总数" width="120" align="center">
+                  <template #default="{ row }">
+                      <el-tag type="danger">{{ row.weak_details ? row.weak_details.length : 0 }} 个</el-tag>
+                  </template>
+              </el-table-column>
+
+              <el-table-column label="状态" width="120" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getSeverityType(row.severity)">
+                    {{ row.severity_text || getSeverityText(row.severity) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+
           <!-- 详细报告 -->
-          <el-card class="report-card" shadow="hover">
+          <el-card class="report-card" shadow="hover" style="margin-top: 20px;">
             <template #header>
               <div class="card-header">
                 <el-icon><Document /></el-icon>
@@ -252,65 +337,6 @@
             <div class="report-content">
               <pre>{{ analysisData.report }}</pre>
             </div>
-          </el-card>
-
-          <!-- 薄弱知识点详情 -->
-          <el-card
-            v-if="analysisData.data.has_weak_points"
-            class="weak-points-card"
-            shadow="hover"
-          >
-            <template #header>
-              <div class="card-header">
-                <div class="header-left">
-                  <el-icon><Warning /></el-icon>
-                  <span>薄弱知识点详情</span>
-                </div>
-                <el-button
-                  type="primary"
-                  @click="goToComprehensivePractice"
-                  :icon="Edit"
-                >
-                  去推荐训练
-                </el-button>
-              </div>
-            </template>
-
-            <el-table :data="analysisData.data.weak_points" stripe>
-              <el-table-column prop="knowledge_point_id" label="知识点/题型" min-width="120" />
-              <el-table-column label="平均分" width="100" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.average_score !== null && row.average_score !== undefined" :style="{ color: getScoreColor(row.average_score) }">
-                    {{ row.average_score }} 分
-                  </span>
-                  <span v-else style="color: #909399">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="练习次数" width="110" align="center">
-                <template #default="{ row }">
-                  {{ row.error_count }} 次
-                </template>
-              </el-table-column>
-              <el-table-column label="严重程度" width="120" align="center">
-                <template #default="{ row }">
-                  <el-tag :type="getSeverityType(row.severity)">
-                    {{ row.severity_text || getSeverityText(row.severity) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="相关章节" min-width="150">
-                <template #default="{ row }">
-                  <el-tag
-                    v-for="chapterId in row.related_chapters"
-                    :key="chapterId"
-                    size="small"
-                    style="margin: 2px"
-                  >
-                    章节 {{ chapterId }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
           </el-card>
 
           <!-- 综合练习答题界面 -->
@@ -459,6 +485,7 @@ import {
     Document,
     Edit,
     FullScreen,
+    List,
     Loading,
     Medal,
     Minus,
@@ -515,7 +542,10 @@ const initCharts = () => {
   })
 
   radarChart.setOption({
-    tooltip: {},
+    tooltip: {
+        confine: true, // 限制在图表容器内
+        appendToBody: true // 将 tooltip 插入到 body 元素，避免被父容器遮挡
+    },
     radar: {
       indicator: chapterNames.map(name => ({ name, max: 100 })),
       radius: '65%'
@@ -541,43 +571,178 @@ const initCharts = () => {
     }]
   })
 
-  // 2. 薄弱点柱状图
+  // 2. 薄弱点分布 (基于小节掌握程度)
   barChart = echarts.init(barChartRef.value)
-  const weakPoints = analysisData.value?.data.weak_points || []
-  const kpNames = weakPoints.map(wp => wp.knowledge_point_id)
-  const errorCounts = weakPoints.map(wp => wp.error_count)
+  const subsectionMastery = analysisData.value?.data.subsection_mastery || []
+  
+  // 显示全部数据（移除 slice(0, 20)），让滚动条来控制显示数量
+  const displayData = subsectionMastery
+  
+  const yAxisData = displayData.map((item: any) => {
+      // 构建富文本标签
+      return {
+          value: item.title, // 只显示标题，不带序号
+          textStyle: {
+              rich: {
+                  chapter: {
+                      color: '#909399',
+                      fontSize: 10,
+                      align: 'right',
+                      padding: [0, 4, 0, 0]
+                  },
+                  title: {
+                      color: '#606266',
+                      fontSize: 12
+                  }
+              }
+          },
+          // 这里的 value 是给 echarts 内部用的，formatter 里可以拿到
+          chapter_info: `第${item.chapter_number}章` 
+      }
+  })
+  
+  const seriesData = displayData.map((item: any) => ({
+    value: item.has_data ? item.average_score : 0,
+    itemStyle: {
+       // 根据分数设置颜色：<60红色，60-80黄色，>=80绿色
+       color: !item.has_data ? '#DCDFE6' : (item.average_score < 60 ? '#F56C6C' : (item.average_score < 80 ? '#E6A23C' : '#67C23A'))
+    },
+    // 将完整信息存入 data 中，供 tooltip 使用
+    customInfo: {
+        full_title: `第${item.chapter_number}章 - ${item.title}`,
+        has_data: item.has_data,
+        practice_count: item.practice_count,
+        average_score: item.average_score
+    }
+  }))
+
+  // 计算每行的高度和总高度
+  const barHeight = 40; // 每行高度
+  const totalHeight = displayData.length * barHeight;
+  
+  // 如果容器有style属性，设置高度；或者我们可以在dataZoom里控制视口大小
+  // 这里我们通过dataZoom控制每次显示的数量，比如每次显示10个
+  const viewCount = 10;
+  const startPercent = 0;
+  const endPercent = Math.min(100, (viewCount / displayData.length) * 100);
 
   barChart.setOption({
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'shadow' }
+      axisPointer: { type: 'shadow' },
+      confine: true, // 限制在图表容器内
+      appendToBody: true, // 将 tooltip 插入到 body 元素，避免被父容器遮挡
+      formatter: (params: any) => {
+        const data = params[0].data
+        const info = data.customInfo
+        if (!info.has_data) return `${info.full_title}<br/>状态: 还没有做题数据`
+        return `${info.full_title}<br/>平均分: ${info.average_score} 分<br/>练习次数: ${info.practice_count} 次`
+      }
     },
     grid: {
       left: '3%',
-      right: '4%',
+      right: '12%',
       bottom: '3%',
       containLabel: true
     },
+    dataZoom: [
+      {
+        type: 'slider',
+        yAxisIndex: 0,
+        start: 0,
+        end: endPercent, // 默认显示前10个
+        zoomLock: true, // 锁定缩放，只能滚动
+        showDetail: false,
+        handleSize: '0%', // 隐藏手柄，看起来像纯滚动条
+        width: 20,
+        right: 10,
+        brushSelect: false
+      },
+      {
+        type: 'inside',
+        yAxisIndex: 0,
+        start: 0,
+        end: endPercent,
+        zoomOnMouseWheel: false, // 禁止鼠标滚轮缩放
+        moveOnMouseWheel: true, // 允许鼠标滚轮移动
+        moveOnMouseMove: true
+      }
+    ],
     xAxis: {
       type: 'value',
-      name: '错误次数'
+      name: '平均得分',
+      max: 100,
+      interval: 10, // 设置刻度间隔为10，虽然主要关注60/80/90/100，但均匀间隔更好看
+      // 或者使用 splitLine 自定义关键刻度线颜色
+      splitLine: {
+          lineStyle: {
+              color: (params: any) => {
+                  if (params.value === 60) return '#F56C6C'; // 红色警戒线
+                  if (params.value === 80) return '#E6A23C'; // 黄色良好线
+                  if (params.value === 90) return '#67C23A'; // 绿色优秀线
+                  return '#E4E7ED'; // 默认颜色
+              },
+              width: (params: any) => {
+                  return [60, 80, 90].includes(params.value) ? 2 : 1; // 关键线加粗
+              },
+              type: (params: any) => {
+                  return [60, 80, 90].includes(params.value) ? 'dashed' : 'solid'; // 关键线虚线
+              }
+          }
+      },
+      axisLabel: {
+           formatter: (value: number) => {
+               // 只显示关键刻度
+               if ([0, 60, 80, 90, 100].includes(value)) {
+                   return value.toString();
+               }
+               return '';
+           }
+       }
     },
     yAxis: {
       type: 'category',
-      data: kpNames,
+      data: yAxisData.map((d: any) => d.value), // echarts category axis expects strings
+      inverse: true,
       axisLabel: {
         interval: 0,
-        width: 100,
-        overflow: 'truncate'
+        width: 150, // Increase width for labels
+        overflow: 'truncate',
+        formatter: (value: string, index: number) => {
+            const item = displayData[index];
+            // 显示格式：[第X章] 标题
+            return `{chapter|第${item.chapter_number}章} {title|${value}}`;
+        },
+        rich: {
+            chapter: {
+                color: '#909399',
+                fontSize: 10,
+                backgroundColor: '#f4f4f5',
+                padding: [2, 4],
+                borderRadius: 2
+            },
+            title: {
+                color: '#606266',
+                fontSize: 12,
+                padding: [0, 0, 0, 5]
+            }
+        }
       }
     },
     series: [
       {
-        name: '错误次数',
+        name: '平均得分',
         type: 'bar',
-        data: errorCounts,
-        itemStyle: {
-          color: '#F56C6C'
+        data: seriesData,
+        barWidth: 20, // 固定柱子宽度
+        label: {
+            show: true,
+            position: 'right',
+            formatter: (params: any) => {
+                const item = displayData[params.dataIndex]
+                return item.has_data ? `${item.average_score}` : '无数据'
+            },
+            color: '#606266'
         }
       }
     ]
