@@ -107,7 +107,40 @@
                 <div v-if="msg.image" class="message-image">
                   <img :src="msg.image" alt="图片" class="message-img" />
                 </div>
-                <div class="message-text" v-html="formatMessage(msg.content)"></div>
+                
+                <!-- 题目生成卡片 -->
+                <div v-if="msg.isQuiz" class="quiz-response-card">
+                  <div class="quiz-card-content">
+                    <div class="quiz-icon-wrapper">
+                      <el-icon :size="24" color="#409EFF"><List /></el-icon>
+                    </div>
+                    <div class="quiz-info">
+                      <div class="quiz-title">{{ msg.quizSummary?.topic || '智能生成练习' }}</div>
+                      <div class="quiz-desc">包含 {{ msg.quizSummary?.count || 0 }} 道题目</div>
+                    </div>
+                  </div>
+                  <div class="quiz-card-actions">
+                    <el-button 
+                      v-if="msg.isCompleted" 
+                      type="success" 
+                      size="small" 
+                      @click="openQuizFromMessage(msg)"
+                    >
+                      查看记录
+                    </el-button>
+                    <el-button 
+                      v-else 
+                      type="primary" 
+                      size="small" 
+                      @click="openQuizFromMessage(msg)"
+                    >
+                      继续练习
+                    </el-button>
+                  </div>
+                </div>
+                
+                <!-- 普通文本消息 -->
+                <div v-else class="message-text" v-html="formatMessage(msg.content)"></div>
               </div>
             </div>
             <div v-if="loading" class="message assistant">
@@ -381,6 +414,79 @@ const defaultProps = {
 
 const quizContext = ref<{type: string, id: number, label: string} | null>(null)
 
+// 解析题目内容的工具函数
+const parseQuizContent = (content: string) => {
+  try {
+    if (!content) return { isQuiz: false }
+    
+    // 1. Try parsing strictly as JSON first (fastest)
+    try {
+        const parsed = JSON.parse(content)
+        const quizData = parsed.generate_interactive_quiz_response || parsed
+        if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
+             return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
+        }
+    } catch(e) {}
+
+    // 2. Cleanup markdown wrappers
+    let jsonStr = content
+    if (content.includes('```')) {
+      const jsonBlock = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+      if (jsonBlock) {
+          jsonStr = jsonBlock[1]
+      }
+    }
+    
+    // 3. Try parsing cleaned string
+    try {
+        const parsed = JSON.parse(jsonStr)
+        const quizData = parsed.generate_interactive_quiz_response || parsed
+        if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
+             return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
+        }
+    } catch(e) {}
+
+    // 4. Fallback: Find largest JSON-like block
+    const firstOpen = jsonStr.indexOf('{')
+    const lastClose = jsonStr.lastIndexOf('}')
+    if (firstOpen !== -1 && lastClose > firstOpen) {
+        const candidate = jsonStr.substring(firstOpen, lastClose + 1)
+        try {
+            const parsed = JSON.parse(candidate)
+            const quizData = parsed.generate_interactive_quiz_response || parsed
+            if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
+                return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
+            }
+        } catch(e) {}
+    }
+
+  } catch (e) {
+    return { isQuiz: false }
+  }
+  return { isQuiz: false }
+}
+
+// 从消息打开题目
+const openQuizFromMessage = (msg: any) => {
+  if (msg.quizSummary && msg.quizSummary.data) {
+    quizData.value = msg.quizSummary.data
+    
+    // 设置当前题目ID，确保可以提交更新
+    currentQuizId.value = msg.realId || null
+    
+    // 根据消息状态设置
+    if (msg.isCompleted && msg.userAnswers) {
+        userAnswers.value = msg.userAnswers
+        isSubmitted.value = true
+    } else {
+        userAnswers.value = {}
+        isSubmitted.value = false
+    }
+    
+    showQuizModal.value = true
+  }
+}
+
 watch(inputMessage, async (newVal) => {
   if (newVal.endsWith('#') || newVal.endsWith('＃')) {
     // Ensure chapters are loaded
@@ -631,6 +737,14 @@ const submitQuiz = async () => {
               is_correct: results
           })
           ElMessage.success(`提交成功！得分: ${score}`)
+          
+          // 更新本地消息状态
+          const msg = messages.value.find(m => m.realId === currentQuizId.value)
+          if (msg) {
+              msg.isCompleted = true
+              msg.userAnswers = userAnswers.value
+          }
+          
           // Refresh history if in history tab
           if (activeTab.value === 'history') {
               fetchQuizHistoryList()
@@ -699,10 +813,19 @@ const handleLoadSession = async (session: any) => {
           role: 'user',
           content: record.user_message
         })
+        
+        // 预处理 AI 消息，检查是否为题目
+        const quizInfo = parseQuizContent(record.assistant_message)
+        
         messages.value.push({
           id: `assistant-${record.id}`,
+          realId: record.id,
           role: 'assistant',
-          content: record.assistant_message
+          content: record.assistant_message,
+          isQuiz: quizInfo.isQuiz,
+          quizSummary: quizInfo.isQuiz ? quizInfo : null,
+          isCompleted: !!(record.chat_metadata && record.chat_metadata.user_answers),
+          userAnswers: record.chat_metadata?.user_answers
         })
       })
     }
@@ -913,8 +1036,13 @@ const handleSend = async () => {
 
     messages.value.push({
       id: res.id,
+      realId: res.id,
       role: 'assistant',
-      content: res.assistant_message
+      content: res.assistant_message,
+      isQuiz: parseQuizContent(res.assistant_message).isQuiz,
+      quizSummary: parseQuizContent(res.assistant_message).isQuiz ? parseQuizContent(res.assistant_message) : null,
+      isCompleted: false,
+      userAnswers: null
     })
 
     scrollToBottom()
@@ -1561,5 +1689,57 @@ const handlePaste = (event: ClipboardEvent) => {
   align-items: center;
   font-size: 12px;
   color: #909399;
+}
+
+.quiz-response-card {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 15px;
+  margin-top: 5px;
+  max-width: 300px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
+}
+
+.quiz-card-content {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.quiz-icon-wrapper {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #ecf5ff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-right: 12px;
+}
+
+.quiz-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.quiz-title {
+  font-size: 15px;
+  font-weight: bold;
+  color: #303133;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quiz-desc {
+  font-size: 13px;
+  color: #909399;
+}
+
+.quiz-card-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

@@ -14,7 +14,8 @@ from app.schemas.quiz import (
     QuizSubmit,
     QuizResponse,
     QuizResult,
-    SubsectionStats
+    SubsectionStats,
+    SectionStats
 )
 from app.schemas.wrong_question import KnowledgePointsResponse
 from app.models.user import User
@@ -292,6 +293,61 @@ def get_subsection_stats(
     }
 
 
+@router.get("/stats/section/{section_id}", response_model=SectionStats)
+def get_section_stats(
+    section_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    获取指定节的练习统计数据
+    """
+    # 1. Get Section details
+    section = db.query(Section).filter(Section.id == section_id).first()
+    if not section:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="节不存在"
+        )
+        
+    # 2. Get User's Quiz Records for this section
+    records = db.query(QuizRecord).filter(
+        QuizRecord.user_id == current_user.id,
+        QuizRecord.section_id == section_id,
+        QuizRecord.is_completed == 1
+    ).all()
+    
+    total_quizzes = len(records)
+    total_questions = sum(r.question_count for r in records)
+    
+    # Calculate average score and accuracy
+    average_score = 0.0
+    avg_accuracy = 0.0
+    max_score = 0.0
+    if total_quizzes > 0:
+        total_score_sum = sum(r.score for r in records)
+        average_score = total_score_sum / total_quizzes
+        max_score = max(r.score for r in records)
+        
+        # Ensure accuracy is calculated correctly
+        total_accuracy_sum = sum(r.accuracy for r in records)
+        avg_accuracy = total_accuracy_sum / total_quizzes
+        
+    # Passed quizzes (score >= 60)
+    passed_quizzes = len([r for r in records if r.score >= 60.0])
+    
+    return {
+        "section_id": section.id,
+        "section_title": section.title,
+        "total_quizzes": total_quizzes,
+        "total_questions": total_questions,
+        "average_score": round(average_score, 1),
+        "avg_accuracy": round(avg_accuracy, 1),
+        "max_score": round(max_score, 1),
+        "passed_quizzes": passed_quizzes
+    }
+
+
 @router.post("/create", response_model=QuizResponse, status_code=status.HTTP_201_CREATED)
 async def create_quiz(
     quiz_data: QuizCreate,
@@ -356,6 +412,7 @@ def submit_quiz(
 def get_quiz_history(
     practice_mode: Optional[str] = None,
     chapter_id: Optional[int] = None,
+    section_id: Optional[int] = None,
     subsection_id: Optional[int] = None,
     limit: int = 10,
     db: Session = Depends(get_db),
@@ -366,6 +423,7 @@ def get_quiz_history(
 
     - **practice_mode**: 按练习方式过滤（可选：chapter/random/comprehensive）
     - **chapter_id**: 按章节过滤（可选）
+    - **section_id**: 按节过滤（可选）
     - **subsection_id**: 按小节过滤（可选）
     - **limit**: 返回数量限制（默认10）
     """
@@ -374,6 +432,7 @@ def get_quiz_history(
         user_id=current_user.id,
         practice_mode=practice_mode,
         chapter_id=chapter_id,
+        section_id=section_id,
         subsection_id=subsection_id,
         limit=limit
     )
@@ -384,6 +443,7 @@ def get_quiz_history(
 @router.get("/stats")
 def get_quiz_stats(
     chapter_id: Optional[int] = None,
+    practice_mode: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -391,6 +451,7 @@ def get_quiz_stats(
     获取练习统计
 
     - **chapter_id**: 章节ID（可选），若提供则只返回该章节的统计数据
+    - **practice_mode**: 练习方式（可选）
 
     返回:
     - **total_count**: 总练习数
@@ -398,7 +459,7 @@ def get_quiz_stats(
     - **avg_score**: 平均分数
     - **avg_accuracy**: 平均正确率
     """
-    stats = quiz_service.get_quiz_stats(db=db, user_id=current_user.id, chapter_id=chapter_id)
+    stats = quiz_service.get_quiz_stats(db=db, user_id=current_user.id, chapter_id=chapter_id, practice_mode=practice_mode)
     return stats
 
 

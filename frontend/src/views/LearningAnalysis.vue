@@ -518,12 +518,13 @@ const initCharts = () => {
   radarChart = echarts.init(radarChartRef.value)
   const chapterNames = goalProgress.value.map(c => `第${c.chapter_number}章`)
   const chapterScores = goalProgress.value.map(c => {
-    // 计算该章节所有小节的平均分
+    // 计算该章节的掌握度（所有小节平均分，未练习算0分）
     let totalScore = 0
     let count = 0
     c.sections?.forEach((s: any) => {
       s.subsections?.forEach((sub: any) => {
-        totalScore += sub.current_score || 0
+        // 统计所有小节，未练习的 average_score 为 0
+        totalScore += sub.average_score || 0
         count++
       })
     })

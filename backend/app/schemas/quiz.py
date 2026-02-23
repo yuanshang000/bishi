@@ -174,3 +174,17 @@ class SubsectionStats(BaseModel):
     
     passed_quizzes: int
     min_questions: int = 10
+
+
+class SectionStats(BaseModel):
+    """节练习统计"""
+    section_id: int
+    section_title: str
+    
+    total_quizzes: int
+    total_questions: int
+    average_score: float
+    avg_accuracy: float = 0.0 # 新增：平均正确率
+    max_score: float
+    
+    passed_quizzes: int

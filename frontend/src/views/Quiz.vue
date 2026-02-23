@@ -354,6 +354,108 @@
               </div>
            </el-card>
 
+           <!-- 节数据统计 (综合训练模式) -->
+           <el-card shadow="hover" v-else-if="sectionStats && quizForm.practice_mode === 'random'" class="stats-card">
+              <template #header>
+                <div class="stats-header">
+                   <span class="stats-title-text">📊 节数据统计</span>
+                   <el-tag class="stats-subtitle-tag" type="success" effect="light">{{ sectionStats.section_title }}</el-tag>
+                </div>
+             </template>
+              <div class="stats-content">
+                 <!-- 顶部计数 -->
+                 <div class="stats-overview">
+                    <div class="overview-item">
+                       <div class="overview-value">{{ sectionStats.total_questions }}</div>
+                       <div class="overview-label">总做题数</div>
+                    </div>
+                    <div class="overview-divider"></div>
+                    <div class="overview-item">
+                       <div class="overview-value">{{ sectionStats.total_quizzes }}</div>
+                       <div class="overview-label">练习次数</div>
+                    </div>
+                 </div>
+                 
+                 <!-- 中间图表 -->
+                 <div class="chart-wrapper">
+                    <div ref="sectionGaugeChartRef" class="gauge-chart"></div>
+                 </div>
+
+                 <!-- 底部 -->
+                 <div class="final-score-card">
+                    <div class="score-row">
+                       <div class="score-col">
+                          <div class="score-label">最高分</div>
+                          <div class="score-value highlight">
+                             {{ sectionStats.max_score }}
+                             <span class="score-sub">分</span>
+                          </div>
+                       </div>
+                       <div class="score-divider-vertical"></div>
+                       <div class="score-col">
+                          <div class="score-label">及格次数</div>
+                          <div class="score-value pass-val">
+                             {{ sectionStats.passed_quizzes }}
+                             <span class="score-sub">次</span>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+           </el-card>
+
+           <!-- 章数据统计 (综合训练模式) -->
+           <el-card shadow="hover" v-else-if="chapterStats && quizForm.practice_mode === 'random'" class="stats-card">
+              <template #header>
+                <div class="stats-header">
+                   <span class="stats-title-text">📊 章数据统计</span>
+                   <el-tag class="stats-subtitle-tag" type="warning" effect="light">
+                     {{ chapterStore.chapters.find(c => c.id === quizForm.chapter_id)?.title || '未知章节' }}
+                   </el-tag>
+                </div>
+             </template>
+              <div class="stats-content">
+                 <!-- 顶部计数 -->
+                 <div class="stats-overview">
+                    <div class="overview-item">
+                       <div class="overview-value">{{ chapterStats.total_questions }}</div>
+                       <div class="overview-label">总做题数</div>
+                    </div>
+                    <div class="overview-divider"></div>
+                    <div class="overview-item">
+                       <div class="overview-value">{{ chapterStats.completed_count }}</div>
+                       <div class="overview-label">练习次数</div>
+                    </div>
+                 </div>
+                 
+                 <!-- 中间图表 -->
+                 <div class="chart-wrapper">
+                    <div ref="chapterGaugeChartRef" class="gauge-chart"></div>
+                 </div>
+
+                 <!-- 底部 -->
+                 <div class="final-score-card">
+                    <div class="score-row">
+                       <div class="score-col">
+                          <div class="score-label">最高分</div>
+                          <div class="score-value highlight">
+                             {{ chapterStats.max_score }}
+                             <span class="score-sub">分</span>
+                          </div>
+                       </div>
+                       <div class="score-divider-vertical"></div>
+                       <div class="score-col">
+                          <div class="score-label">及格次数</div>
+                          <div class="score-value pass-val">
+                             {{ chapterStats.passed_count }}
+                             <span class="score-sub">次</span>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+           </el-card>
+
            <!-- 推荐训练薄弱点概览 -->
            <el-card shadow="hover" v-else-if="quizForm.practice_mode === 'comprehensive'" class="stats-card weak-points-overview">
               <template #header>
@@ -521,6 +623,56 @@
                                 {{ overallStats.pass_rate }}
                                 <span class="score-sub">%</span>
                              </div>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+           </el-card>
+
+           <!-- 综合训练总览统计 -->
+           <el-card shadow="hover" v-else-if="overallComprehensiveStats && quizForm.practice_mode === 'random'" class="stats-card">
+              <template #header>
+                <div class="stats-header">
+                   <span class="stats-title-text">📊 综合训练总览</span>
+                   <el-tag class="stats-subtitle-tag" type="success" effect="light">全站统计</el-tag>
+                </div>
+             </template>
+              <div class="stats-content">
+                 <!-- 顶部计数 -->
+                 <div class="stats-overview">
+                    <div class="overview-item">
+                       <div class="overview-value">{{ overallComprehensiveStats.total_questions }}</div>
+                       <div class="overview-label">总做题数</div>
+                    </div>
+                    <div class="overview-divider"></div>
+                    <div class="overview-item">
+                       <div class="overview-value">{{ overallComprehensiveStats.completed_count }}</div>
+                       <div class="overview-label">练习次数</div>
+                    </div>
+                 </div>
+                 
+                 <!-- 中间图表 -->
+                 <div class="chart-wrapper">
+                    <div ref="comprehensiveGaugeChartRef" class="gauge-chart"></div>
+                 </div>
+
+                 <!-- 底部 -->
+                 <div class="final-score-card">
+                    <div class="score-row">
+                       <div class="score-col">
+                          <div class="score-label">最高分</div>
+                          <div class="score-value highlight">
+                             {{ overallComprehensiveStats.max_score }}
+                             <span class="score-sub">分</span>
+                          </div>
+                       </div>
+                       <div class="score-divider-vertical"></div>
+                       <div class="score-col">
+                          <div class="score-label">及格次数</div>
+                          <div class="score-value pass-val">
+                             {{ overallComprehensiveStats.passed_count }}
+                             <span class="score-sub">次</span>
                           </div>
                        </div>
                     </div>
@@ -1343,7 +1495,7 @@
 </template>
 
 <script setup lang="ts">
-import { createPersonalizedQuiz, createQuiz, createSectionComprehensiveQuiz, generateWordTraining, getMyLearningAnalysis, getQuiz, getQuizHistory, getQuizStats, getSubsectionStats, submitQuiz, submitReviewQuiz } from '@/api'
+import { createPersonalizedQuiz, createQuiz, createSectionComprehensiveQuiz, generateWordTraining, getMyLearningAnalysis, getQuiz, getQuizHistory, getQuizStats, getSectionStats, getSubsectionStats, submitQuiz, submitReviewQuiz } from '@/api'
 import { useChapterStore, useUserStore } from '@/stores'
 import { DataAnalysis, Loading, Timer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -1390,11 +1542,20 @@ const rulesPreview = ref<string>('')
 let timer: any = null
 
 const subsectionStats = ref<any>(null)
+const sectionStats = ref<any>(null) // 新增：节统计数据
+const chapterStats = ref<any>(null) // 新增：章统计数据 (综合训练模式)
 const overallStats = ref<any>(null)
+const overallComprehensiveStats = ref<any>(null) // 新增：综合训练总览统计
 const weakPointsData = ref<any[]>([]) // 新增：薄弱知识点数据
 const selectedStatsChapter = ref<number | null>(null) // 新增：用于统计卡片的章节选择
 const gaugeChartRef = ref<HTMLElement | null>(null)
+const sectionGaugeChartRef = ref<HTMLElement | null>(null) // 新增：节统计图表容器
+const chapterGaugeChartRef = ref<HTMLElement | null>(null) // 新增：章统计图表容器
+const comprehensiveGaugeChartRef = ref<HTMLElement | null>(null) // 新增：综合训练总览图表容器
 let gaugeChart: echarts.ECharts | null = null
+let sectionGaugeChart: echarts.ECharts | null = null // 新增：节统计图表实例
+let chapterGaugeChart: echarts.ECharts | null = null // 新增：章统计图表实例
+let comprehensiveGaugeChart: echarts.ECharts | null = null // 新增：综合训练总览图表实例
 
 const quizForm = reactive({
   practice_mode: 'chapter' as 'chapter' | 'random' | 'comprehensive',  // 练习方式
@@ -1403,7 +1564,7 @@ const quizForm = reactive({
   subsection_id: undefined as number | undefined, // 新增：小节ID
   quiz_type: 'listening' as any,
   question_count: 5,
-  difficulty: 'intermediate'
+  difficulty: '中级'
 })
 
 // 级联选择器的绑定值
@@ -1467,6 +1628,12 @@ const chapterOptions = computed(() => {
       // 只有非综合训练模式下才显示整体统计
       if (quizForm.practice_mode !== 'random') {
         fetchOverallStats() 
+      } else {
+        chapterStats.value = null
+        sectionStats.value = null
+        fetchHistory()
+        // 获取综合训练总览统计
+        fetchComprehensiveStats()
       }
       return
     }
@@ -1477,8 +1644,18 @@ const chapterOptions = computed(() => {
   // 更新 section_id (如果有第二级)
   if (value.length >= 2) {
       quizForm.section_id = value[1]
+      
+      // 如果是综合训练模式，且选择了节，获取节统计数据
+      if (quizForm.practice_mode === 'random') {
+          await fetchSectionStatsData(value[1])
+          chapterStats.value = null // 清除章统计
+          overallComprehensiveStats.value = null // 清除综合总览
+          // 同时也更新历史记录
+          fetchHistory()
+      }
   } else {
       quizForm.section_id = undefined
+      sectionStats.value = null
   }
   
   // 如果选到了小目标（第三级）
@@ -1500,6 +1677,15 @@ const chapterOptions = computed(() => {
     quizForm.subsection_id = undefined
     subsectionStats.value = null
     // fetchOverallStats() // Keep current stats or fetch overall?
+    
+    // 如果是综合训练模式，且只选择了章，获取章统计数据
+    if (quizForm.practice_mode === 'random' && value.length === 1) {
+      await fetchChapterStatsData(value[0])
+      sectionStats.value = null // 清除节统计
+      overallComprehensiveStats.value = null // 清除综合总览
+      // 同时也更新历史记录
+      fetchHistory()
+    }
   }
 }
 
@@ -1513,6 +1699,47 @@ const fetchSubsectionStatsData = async (subsectionId: number) => {
   } catch (error) {
     console.error('Failed to fetch subsection stats:', error)
     subsectionStats.value = null
+  }
+}
+
+const fetchSectionStatsData = async (sectionId: number) => {
+  try {
+    const res = await getSectionStats(sectionId)
+    sectionStats.value = res
+    nextTick(() => {
+      // 综合训练使用雷达图
+      initSectionRadarChart(res)
+    })
+  } catch (error) {
+    console.error('Failed to fetch section stats:', error)
+    sectionStats.value = null
+  }
+}
+
+const fetchChapterStatsData = async (chapterId: number) => {
+  try {
+    const res: any = await getQuizStats(chapterId)
+    chapterStats.value = res
+    nextTick(() => {
+      // 综合训练使用雷达图
+      initChapterRadarChart(res)
+    })
+  } catch (error) {
+    console.error('Failed to fetch chapter stats:', error)
+    chapterStats.value = null
+  }
+}
+
+const fetchComprehensiveStats = async () => {
+  try {
+    const res: any = await getQuizStats(null, 'random')
+    overallComprehensiveStats.value = res
+    nextTick(() => {
+      initComprehensiveRadarChart(res)
+    })
+  } catch (error) {
+    console.error('Failed to fetch comprehensive stats:', error)
+    overallComprehensiveStats.value = null
   }
 }
 
@@ -1702,9 +1929,197 @@ const initGaugeChart = (score: number, title: string, passingScore: number = 60)
   gaugeChart.setOption(option);
 }
 
+
+const initSectionRadarChart = (stats: any) => {
+  if (!sectionGaugeChartRef.value) return
+  
+  if (sectionGaugeChart) {
+    sectionGaugeChart.dispose()
+  }
+
+  sectionGaugeChart = echarts.init(sectionGaugeChartRef.value)
+  
+  const option = {
+    tooltip: {
+      trigger: 'item'
+    },
+    radar: {
+      indicator: [
+        { name: '平均分', max: 100 },
+        { name: '最高分', max: 100 },
+        { name: '及格率', max: 100 },
+        { name: '正确率', max: 100 }
+      ],
+      shape: 'circle',
+      splitNumber: 4,
+      axisName: {
+        color: '#666'
+      },
+      splitArea: {
+        areaStyle: {
+          color: ['#fff', '#f5f7fa']
+        }
+      }
+    },
+    series: [
+      {
+        type: 'radar',
+        data: [
+          {
+            value: [
+              stats.average_score,
+              stats.max_score,
+              Math.round((stats.passed_quizzes / (stats.total_quizzes || 1)) * 100),
+              // 如果 avg_accuracy 为 0 但 average_score 不为 0，说明后端可能没返回新字段，回退使用 average_score
+              stats.avg_accuracy || (stats.average_score > 0 ? stats.average_score : 0)
+            ],
+            name: '数据统计',
+            areaStyle: {
+              color: 'rgba(64, 158, 255, 0.2)'
+            },
+            lineStyle: {
+              color: '#409EFF'
+            },
+            itemStyle: {
+              color: '#409EFF'
+            }
+          }
+        ]
+      }
+    ]
+  };
+  
+  sectionGaugeChart.setOption(option);
+}
+
+const initChapterRadarChart = (stats: any) => {
+  if (!chapterGaugeChartRef.value) return
+  
+  if (chapterGaugeChart) {
+    chapterGaugeChart.dispose()
+  }
+
+  chapterGaugeChart = echarts.init(chapterGaugeChartRef.value)
+  
+  const option = {
+    tooltip: {
+      trigger: 'item'
+    },
+    radar: {
+      indicator: [
+        { name: '平均分', max: 100 },
+        { name: '最高分', max: 100 },
+        { name: '及格率', max: 100 },
+        { name: '正确率', max: 100 }
+      ],
+      shape: 'circle',
+      splitNumber: 4,
+      axisName: {
+        color: '#666'
+      },
+      splitArea: {
+        areaStyle: {
+          color: ['#fff', '#f5f7fa']
+        }
+      }
+    },
+    series: [
+      {
+        type: 'radar',
+        data: [
+          {
+            value: [
+              stats.avg_score,
+              stats.max_score,
+              stats.pass_rate || Math.round((stats.passed_count / (stats.completed_count || 1)) * 100),
+              stats.avg_accuracy || (stats.avg_score > 0 ? stats.avg_score : 0)
+            ],
+            name: '数据统计',
+            areaStyle: {
+              color: 'rgba(230, 162, 60, 0.2)'
+            },
+            lineStyle: {
+              color: '#E6A23C'
+            },
+            itemStyle: {
+              color: '#E6A23C'
+            }
+          }
+        ]
+      }
+    ]
+  };
+  
+  chapterGaugeChart.setOption(option);
+}
+
+const initComprehensiveRadarChart = (stats: any) => {
+  if (!comprehensiveGaugeChartRef.value) return
+  
+  if (comprehensiveGaugeChart) {
+    comprehensiveGaugeChart.dispose()
+  }
+
+  comprehensiveGaugeChart = echarts.init(comprehensiveGaugeChartRef.value)
+  
+  const option = {
+    tooltip: {
+      trigger: 'item'
+    },
+    radar: {
+      indicator: [
+        { name: '平均分', max: 100 },
+        { name: '最高分', max: 100 },
+        { name: '及格率', max: 100 },
+        { name: '正确率', max: 100 }
+      ],
+      shape: 'circle',
+      splitNumber: 4,
+      axisName: {
+        color: '#666'
+      },
+      splitArea: {
+        areaStyle: {
+          color: ['#fff', '#f5f7fa']
+        }
+      }
+    },
+    series: [
+      {
+        type: 'radar',
+        data: [
+          {
+            value: [
+              stats.avg_score,
+              stats.max_score,
+              stats.pass_rate || Math.round((stats.passed_count / (stats.completed_count || 1)) * 100),
+              stats.avg_accuracy || (stats.avg_score > 0 ? stats.avg_score : 0)
+            ],
+            name: '数据统计',
+            areaStyle: {
+              color: 'rgba(103, 194, 58, 0.2)'
+            },
+            lineStyle: {
+              color: '#67C23A'
+            },
+            itemStyle: {
+              color: '#67C23A'
+            }
+          }
+        ]
+      }
+    ]
+  };
+  
+  comprehensiveGaugeChart.setOption(option);
+}
+
 // 监听窗口大小变化，调整图表大小
 window.addEventListener('resize', () => {
   gaugeChart && gaugeChart.resize()
+  sectionGaugeChart && sectionGaugeChart.resize()
+  chapterGaugeChart && chapterGaugeChart.resize()
+  comprehensiveGaugeChart && comprehensiveGaugeChart.resize()
 })
 
 // 解析 requirements 并设置题型
@@ -1874,6 +2289,9 @@ onMounted(async () => {
   // 初始获取全局统计
   if (quizForm.practice_mode !== 'random') {
     fetchOverallStats()
+  } else {
+    // 如果初始就是综合训练模式，加载综合训练总览
+    fetchComprehensiveStats()
   }
 
   // 检查URL query参数，如果有mode参数则自动切换到对应模式
@@ -1918,6 +2336,14 @@ const fetchHistory = async () => {
       }
       if (quizForm.subsection_id) {
         params.subsection_id = quizForm.subsection_id
+      }
+    } else if (quizForm.practice_mode === 'random') {
+      // 综合训练模式，如果有section_id，则过滤
+      if (quizForm.section_id) {
+        params.section_id = quizForm.section_id
+      } else if (quizForm.chapter_id) {
+        // 如果没有节但有章，按章过滤
+        params.chapter_id = quizForm.chapter_id
       }
     }
 
@@ -2262,6 +2688,9 @@ const handleSubmit = async () => {
     } else if (quizForm.practice_mode === 'chapter' && quizForm.subsection_id) {
         // 如果是章节练习且选择了小节，更新小节统计
         fetchSubsectionStatsData(quizForm.subsection_id)
+    } else if (quizForm.practice_mode === 'random' && quizForm.section_id) {
+        // 综合训练且选择了节，更新节统计
+        fetchSectionStatsData(quizForm.section_id)
     } else {
         // 否则更新总体统计
         fetchOverallStats()
@@ -2316,6 +2745,9 @@ const handleRetry = () => {
   if (quizForm.practice_mode === 'chapter' && quizForm.subsection_id) {
       // 如果是章节练习且选择了小节，更新小节统计
       fetchSubsectionStatsData(quizForm.subsection_id)
+  } else if (quizForm.practice_mode === 'random' && quizForm.section_id) {
+      // 综合训练且选择了节，更新节统计
+      fetchSectionStatsData(quizForm.section_id)
   } else {
       // 否则更新总体统计
       fetchOverallStats()
@@ -2391,10 +2823,12 @@ watch(() => quizForm.practice_mode, (newMode) => {
   quizForm.section_id = undefined
   quizForm.subsection_id = undefined
   subsectionStats.value = null
+  sectionStats.value = null
   
   // 综合训练不显示统计
   if (newMode === 'random') {
     overallStats.value = null
+    fetchComprehensiveStats() // 新增：切换到综合训练时加载总览
   } else if (newMode === 'chapter') {
     fetchOverallStats()
   } else if (newMode === 'comprehensive') {

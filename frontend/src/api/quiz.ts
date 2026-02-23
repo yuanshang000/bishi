@@ -1,12 +1,12 @@
 import type {
-    KnowledgePointsResponse,
-    Quiz,
-    QuizCreateForm,
-    QuizCreateTargetedForm,
-    QuizResult,
-    QuizSubmitForm
-} from '@/types'
-import request from '@/utils/request'
+  KnowledgePointsResponse,
+  Quiz,
+  QuizCreateForm,
+  QuizCreateTargetedForm,
+  QuizResult,
+  QuizSubmitForm
+} from '@/types';
+import request from '@/utils/request';
 
 // 创建练习
 export const createQuiz = (data: QuizCreateForm) => {
@@ -34,10 +34,11 @@ export const getQuizHistory = (params?: { practice_mode?: string; chapter_id?: n
 }
 
 // 获取练习统计
-export const getQuizStats = (chapterId?: number | null) => {
+export const getQuizStats = (chapterId?: number | null, practiceMode?: string) => {
   return request.get('/quiz/stats', { 
     params: { 
-      chapter_id: chapterId 
+      chapter_id: chapterId,
+      practice_mode: practiceMode
     } 
   })
 }
@@ -79,4 +80,9 @@ export const getTeacherGradeStats = (params: { chapter_id?: number; section_id?:
 // 教师端：获取知识点薄弱项统计
 export const getTeacherKpStats = (params: { chapter_id?: number; section_id?: number; subsection_id?: number; limit?: number }) => {
   return request.get('/quiz/stats/teacher/knowledge_points', { params })
+}
+
+// 获取节练习统计
+export const getSectionStats = (sectionId: number) => {
+  return request.get<any>(`/quiz/stats/section/${sectionId}`)
 }

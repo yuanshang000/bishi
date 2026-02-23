@@ -1119,6 +1119,7 @@ class QuizService:
         user_id: int,
         practice_mode: Optional[str] = None,
         chapter_id: Optional[int] = None,
+        section_id: Optional[int] = None,
         subsection_id: Optional[int] = None,
         limit: int = 10
     ) -> List[QuizRecord]:
@@ -1130,6 +1131,7 @@ class QuizService:
             user_id: 用户ID
             practice_mode: 练习方式（可选：chapter/random/comprehensive）
             chapter_id: 章节ID（可选）
+            section_id: 节ID（可选）
             subsection_id: 小节ID（可选）
             limit: 返回数量限制
 
@@ -1148,6 +1150,9 @@ class QuizService:
         if chapter_id:
             query = query.filter(QuizRecord.chapter_id == chapter_id)
             
+        if section_id:
+            query = query.filter(QuizRecord.section_id == section_id)
+            
         if subsection_id:
             query = query.filter(QuizRecord.subsection_id == subsection_id)
 
@@ -1156,7 +1161,7 @@ class QuizService:
         return records
 
     @staticmethod
-    def get_quiz_stats(db: Session, user_id: int, chapter_id: Optional[int] = None) -> Dict[str, Any]:
+    def get_quiz_stats(db: Session, user_id: int, chapter_id: Optional[int] = None, practice_mode: Optional[str] = None) -> Dict[str, Any]:
         """
         获取练习统计
 
@@ -1164,6 +1169,7 @@ class QuizService:
             db: 数据库会话
             user_id: 用户ID
             chapter_id: 章节ID（可选）
+            practice_mode: 练习方式（可选）
 
         Returns:
             Dict: 统计数据
@@ -1172,6 +1178,8 @@ class QuizService:
         base_filters = [QuizRecord.user_id == user_id]
         if chapter_id is not None:
             base_filters.append(QuizRecord.chapter_id == chapter_id)
+        if practice_mode:
+            base_filters.append(QuizRecord.practice_mode == practice_mode)
         
         # 总练习数
         total_count = db.query(QuizRecord).filter(*base_filters).count()
@@ -1194,6 +1202,9 @@ class QuizService:
         passed_filters = completed_filters + [QuizRecord.score >= 60]
         passed_count = db.query(QuizRecord).filter(*passed_filters).count()
 
+        # 最高分
+        max_score = db.query(func.max(QuizRecord.score)).filter(*completed_filters).scalar() or 0
+
         result = {
             "total_count": total_count,
             "completed_count": completed_count,
@@ -1201,6 +1212,7 @@ class QuizService:
             "avg_accuracy": round(avg_accuracy, 1),
             "total_questions": int(total_questions),
             "passed_count": passed_count,
+            "max_score": round(max_score, 1),
             # For compatibility with frontend if needed
             "pass_rate": round((passed_count / completed_count * 100) if completed_count > 0 else 0, 1)
         }
