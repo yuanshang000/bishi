@@ -24,17 +24,17 @@
           <span>练习中心</span>
         </el-menu-item>
 
-        <el-menu-item index="/wrong-questions">
+        <el-menu-item index="/wrong-questions" v-if="!userStore.isTeacher">
           <el-icon><Warning /></el-icon>
           <span>错题库</span>
         </el-menu-item>
 
-        <el-menu-item index="/chat">
+        <el-menu-item index="/chat" v-if="!userStore.isTeacher">
           <el-icon><ChatDotRound /></el-icon>
           <span>智能问答</span>
         </el-menu-item>
 
-        <el-menu-item index="/learning-analysis">
+        <el-menu-item index="/learning-analysis" v-if="!userStore.isTeacher">
           <el-icon><TrendCharts /></el-icon>
           <span>AI学情分析</span>
         </el-menu-item>
@@ -78,14 +78,14 @@
 <script setup lang="ts">
 import { useUserStore } from '@/stores'
 import {
-    ArrowDown,
-    ChatDotRound,
-    Edit,
-    HomeFilled,
-    Reading,
-    SwitchButton,
-    TrendCharts,
-    Warning
+  ArrowDown,
+  ChatDotRound,
+  Edit,
+  HomeFilled,
+  Reading,
+  SwitchButton,
+  TrendCharts,
+  Warning
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'

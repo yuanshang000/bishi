@@ -68,7 +68,7 @@
             <el-button type="primary" :icon="Edit" @click="$router.push('/quiz')" block>
               开始练习
             </el-button>
-            <el-button type="success" :icon="ChatDotRound" @click="$router.push('/chat')" block>
+            <el-button v-if="!userStore.isTeacher" type="success" :icon="ChatDotRound" @click="$router.push('/chat')" block>
               智能问答
             </el-button>
             <el-button

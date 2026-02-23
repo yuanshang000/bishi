@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores'
+import { ElMessage } from 'element-plus'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -27,7 +28,7 @@ const router = createRouter({
           path: '/chapters',
           name: 'Chapters',
           component: () => import('@/views/Chapters.vue'),
-          meta: { title: '章节管理' }
+          meta: { title: '章节管理', roles: ['teacher'] }
         },
         {
           path: '/quiz',
@@ -45,19 +46,19 @@ const router = createRouter({
           path: '/wrong-questions',
           name: 'WrongQuestions',
           component: () => import('@/views/WrongQuestions.vue'),
-          meta: { title: '错题库' }
+          meta: { title: '错题库', roles: ['student'] }
         },
         {
           path: '/chat',
           name: 'Chat',
           component: () => import('@/views/Chat.vue'),
-          meta: { title: '智能问答' }
+          meta: { title: '智能问答', roles: ['student'] }
         },
         {
           path: '/learning-analysis',
           name: 'LearningAnalysis',
           component: () => import('@/views/LearningAnalysis.vue'),
-          meta: { title: 'AI学情分析' }
+          meta: { title: 'AI学情分析', roles: ['student'] }
         }
       ]
     }
@@ -73,6 +74,15 @@ router.beforeEach((to, from, next) => {
   } else if (to.path === '/login' && userStore.isLoggedIn) {
     next('/')
   } else {
+    // 权限检查
+    const requiredRoles = to.meta.roles as string[] | undefined
+    if (requiredRoles && userStore.user) {
+      if (!requiredRoles.includes(userStore.user.role)) {
+        ElMessage.warning('无权访问该页面')
+        next('/home')
+        return
+      }
+    }
     next()
   }
 })
