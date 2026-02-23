@@ -20,9 +20,15 @@ class ComprehensiveQuizService:
 
     def _get_client(self):
         if not self.client:
+            # Use a longer timeout for comprehensive generation tasks
+            timeout = getattr(settings, "LLM_TIMEOUT", 60.0)
+            if timeout < 60:
+                timeout = 60.0
+                
             self.client = AsyncOpenAI(
                 api_key=settings.DEEPSEEK_API_KEY if settings.LLM_PROVIDER == "deepseek" else settings.OPENAI_API_KEY,
                 base_url=settings.LLM_BASE_URL if settings.LLM_PROVIDER == "deepseek" else settings.LLM_BASE_URL,
+                timeout=timeout
             )
         return self.client
 
@@ -103,38 +109,64 @@ class ComprehensiveQuizService:
 """
 
         client = self._get_client()
-        try:
-            response = await client.chat.completions.create(
-                model=settings.LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=2000
-            )
-            content = response.choices[0].message.content
-            # Clean markdown code blocks if present
-            content = re.sub(r'^```json\s*', '', content)
-            content = re.sub(r'^```\s*', '', content)
-            content = re.sub(r'\s*```$', '', content)
-            
+        max_retries = 3
+        last_error = None
+        
+        for attempt in range(max_retries):
             try:
-                data = json.loads(content)
-                # Ensure meta info is included
-                if "meta" not in data:
-                    data["meta"] = {
-                        "word": knowledge_content[:200] + "..." if len(knowledge_content) > 200 else knowledge_content,
-                        "prompt": prompt
-                    }
-                return data
-            except json.JSONDecodeError:
-                logger.error(f"JSON Parse Error: {content}")
-                return {"error": "JSON parse error", "raw": content}
+                response = await client.chat.completions.create(
+                    model=settings.LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                content = response.choices[0].message.content
+                # Clean markdown code blocks if present
+                content = re.sub(r'^```json\s*', '', content)
+                content = re.sub(r'^```\s*', '', content)
+                content = re.sub(r'\s*```$', '', content)
                 
-        except Exception as e:
-            logger.error(f"LLM generation failed: {e}")
-            return {"error": str(e)}
+                try:
+                    data = json.loads(content)
+                    # Ensure meta info is included
+                    if "meta" not in data:
+                        data["meta"] = {
+                            "word": knowledge_content[:200] + "..." if len(knowledge_content) > 200 else knowledge_content,
+                            "prompt": prompt
+                        }
+                    return data
+                except json.JSONDecodeError:
+                    logger.error(f"JSON Parse Error: {content}")
+                    # If JSON fails, maybe retry? Or return error.
+                    # Usually LLM might output text preamble.
+                    # Let's try to extract JSON from text if simple load fails
+                    match = re.search(r'\{.*\}', content, re.DOTALL)
+                    if match:
+                        try:
+                            data = json.loads(match.group(0))
+                            if "meta" not in data:
+                                data["meta"] = {
+                                    "word": knowledge_content[:200] + "..." if len(knowledge_content) > 200 else knowledge_content,
+                                    "prompt": prompt
+                                }
+                            return data
+                        except:
+                            pass
+                    
+                    if attempt < max_retries - 1:
+                        continue # Retry generation
+                    return {"error": "JSON parse error", "raw": content}
+                    
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"LLM generation failed (Attempt {attempt+1}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
+        
+        return {"error": f"Generation failed after {max_retries} attempts: {last_error}"}
 
     async def generate_quiz(self, db: Session, section_id: int, difficulty: str, count: int) -> Dict[str, Any]:
         knowledge = self.get_section_knowledge(db, section_id)

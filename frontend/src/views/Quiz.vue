@@ -1343,7 +1343,7 @@
 </template>
 
 <script setup lang="ts">
-import { createPersonalizedQuiz, createQuiz, createSectionComprehensiveQuiz, generateWordTraining, getMyLearningAnalysis, getQuiz, getQuizHistory, getQuizStats, getSubsectionStats, submitQuiz } from '@/api'
+import { createPersonalizedQuiz, createQuiz, createSectionComprehensiveQuiz, generateWordTraining, getMyLearningAnalysis, getQuiz, getQuizHistory, getQuizStats, getSubsectionStats, submitQuiz, submitReviewQuiz } from '@/api'
 import { useChapterStore, useUserStore } from '@/stores'
 import { DataAnalysis, Loading, Timer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
@@ -2215,15 +2215,46 @@ const handleSubmit = async () => {
   })
 
   try {
-    const res: any = await submitQuiz({
-      quiz_id: currentQuiz.value.id,
-      user_answers: answers,
-      time_spent: timeSpent.value
-    })
+    let res: any
+
+    // 判断是否为错题重练 (Review Quiz)
+    // 错题重练没有 quiz_id，而是有 wrong_question_ids
+    if (currentQuiz.value.wrong_question_ids && currentQuiz.value.wrong_question_ids.length > 0) {
+      res = await submitReviewQuiz({
+        wrong_question_ids: currentQuiz.value.wrong_question_ids,
+        user_answers: answers
+      })
+      
+      // 适配返回值格式，使其与普通练习一致
+      res.wrong_count = res.total_count - res.correct_count
+      
+      // 为结果添加解析和索引 (后端 ReviewQuiz 接口可能不返回 explanation)
+      if (res.results && Array.isArray(res.results)) {
+        res.results.forEach((r: any, idx: number) => {
+          if (questions.value[idx]) {
+            // 尝试从原始题目中获取解析
+            r.explanation = questions.value[idx].explanation || questions.value[idx].question_data?.explanation
+            r.question_index = idx
+          }
+        })
+      }
+    } else {
+      // 普通练习提交
+      res = await submitQuiz({
+        quiz_id: currentQuiz.value.id,
+        user_answers: answers,
+        time_spent: timeSpent.value
+      })
+    }
+
     result.value = res
     showResult.value = true
     stopTimer()
-    fetchHistory()
+    
+    // 仅在非错题重练模式下刷新历史记录 (错题重练不生成 QuizRecord)
+    if (!currentQuiz.value.wrong_question_ids) {
+      fetchHistory()
+    }
     
     // 更新统计数据
     if (quizForm.practice_mode === 'comprehensive') {
@@ -2398,7 +2429,7 @@ const hasOptions = (q: any) => {
 
 // 获取题目的实际类型（综合练习时使用题目自身的quiz_type）
 const getQuestionType = (question: any, quizType: string) => {
-  let type = quizType.split(':')[0]
+  let type = quizType ? quizType.split(':')[0] : ''
   
   // 优先检查 question.quiz_type
   if (question && question.quiz_type) {
@@ -2408,6 +2439,12 @@ const getQuestionType = (question: any, quizType: string) => {
   else if (question && question.question_type) {
     type = question.question_type.split(':')[0]
   }
+  
+  // 如果没有找到类型，默认为 'choice'，防止报错
+  if (!type) {
+    return 'choice'
+  }
+
   
   // 规范化类型名称
   if (['fill_in_the_blank', 'dictation', 'spelling'].includes(type)) {

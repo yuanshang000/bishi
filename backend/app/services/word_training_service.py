@@ -20,9 +20,15 @@ class WordTrainingService:
         
     def _get_client(self):
         if not self.client:
+            # Use a longer timeout for generation tasks
+            timeout = getattr(settings, "LLM_TIMEOUT", 60.0)
+            if timeout < 60:
+                timeout = 60.0
+                
             self.client = AsyncOpenAI(
                 api_key=settings.DEEPSEEK_API_KEY if settings.LLM_PROVIDER == "deepseek" else settings.OPENAI_API_KEY,
                 base_url=settings.LLM_BASE_URL if settings.LLM_PROVIDER == "deepseek" else settings.LLM_BASE_URL,
+                timeout=timeout
             )
         return self.client
 
@@ -212,37 +218,47 @@ class WordTrainingService:
         
         final_user_content = f"{display_prompt}\n\n{system_instruction}"
         
-        try:
-             response = await client.chat.completions.create(
-                 model=settings.LLM_MODEL, 
-                 messages=[{"role": "user", "content": final_user_content}],
-                 temperature=0.7,
-                 response_format={"type": "json_object"} # Force JSON if supported by model/proxy
-             )
-             
-             content = response.choices[0].message.content
-             
-             # Clean markdown code blocks if present
-             content = content.strip()
-             if content.startswith("```json"):
-                 content = content[7:]
-             elif content.startswith("```"):
-                 content = content[3:]
-             
-             if content.endswith("```"):
-                 content = content[:-3]
+        max_retries = 3
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                 response = await client.chat.completions.create(
+                     model=settings.LLM_MODEL, 
+                     messages=[{"role": "user", "content": final_user_content}],
+                     temperature=0.7,
+                     response_format={"type": "json_object"} # Force JSON if supported by model/proxy
+                 )
                  
-             content = content.strip()
-             
-             return {
-                 "word": word,
-                 "prompt": display_prompt, # Store only the display prompt
-                 "question_content": content,
-                 "success": True,
-                 "template_type": quiz_type_hint # Return hint for upper layer
-             }
-        except Exception as e:
-            return {"word": word, "error": str(e), "success": False}
+                 content = response.choices[0].message.content
+                 
+                 # Clean markdown code blocks if present
+                 content = content.strip()
+                 if content.startswith("```json"):
+                     content = content[7:]
+                 elif content.startswith("```"):
+                     content = content[3:]
+                 
+                 if content.endswith("```"):
+                     content = content[:-3]
+                     
+                 content = content.strip()
+                 
+                 return {
+                     "word": word,
+                     "prompt": display_prompt, # Store only the display prompt
+                     "question_content": content,
+                     "success": True,
+                     "template_type": quiz_type_hint # Return hint for upper layer
+                 }
+            except Exception as e:
+                last_error = str(e)
+                print(f"Attempt {attempt + 1}/{max_retries} failed for word '{word}': {e}")
+                # Wait a bit before retrying
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
+        
+        return {"word": word, "error": f"Failed after {max_retries} attempts. Last error: {last_error}", "success": False}
 
     async def generate_word_quiz(self, db: Session, user_id: int, subsection_id: int, count: int, practice_mode: str = 'subsection') -> List[Dict[str, Any]]:
         # 1. Determine type

@@ -15,14 +15,15 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.tools.tool_definitions import TOOL_DEFINITIONS
-from app.tools import (
-    get_wrong_questions_by_subsection,
-    get_student_learning_progress,
-    get_next_content,
-    get_student_weak_points,
-    get_student_quiz_history,
-    search_course_content
-)
+# Import tools lazily inside methods to avoid circular imports
+# from app.tools import (
+#     get_wrong_questions_by_subsection,
+#     get_student_learning_progress,
+#     get_next_content,
+#     get_student_weak_points,
+#     get_student_quiz_history,
+#     search_course_content
+# )
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,15 @@ class LLMService:
                 
                 # 可用工具映射
                 from app.tools.quiz_tools import generate_interactive_quiz
+                from app.tools import (
+                    get_wrong_questions_by_subsection,
+                    get_student_learning_progress,
+                    get_next_content,
+                    get_student_weak_points,
+                    get_student_quiz_history,
+                    search_course_content
+                )
+                
                 available_functions = {
                     "get_wrong_questions_by_subsection": get_wrong_questions_by_subsection,
                     "get_student_learning_progress": get_student_learning_progress,
@@ -514,6 +524,9 @@ class LLMService:
 2. **难度适配**：{difficulty} (easy: 基础/直白; intermediate: 四级水平; hard: 六级/雅思水平)。
 3. **格式严格**：必须返回合法的 JSON 数组。
 """
+        # 添加针对 SubSection 上下文的特殊提示
+        if "【subsection:" in context or "【知识点内容】" in context:
+             base_prompt += "\n**特别注意：** 上下文是特定的知识点内容。请严格基于提供的知识点（单词、短语、句子）出题，不要超出这些知识点的范围。优先考察上下文中的生词和表达。\n"
 
         type_specific_prompts = {
             "choice": """

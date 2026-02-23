@@ -665,10 +665,17 @@ class RAGService:
             query_embedding = self.get_embeddings([subsection_title])[0]
 
             # 仅检索该小目标的向量
+            # ChromaDB 的 where 语法对于多个条件需要使用 $and
+            # 经检查，数据库中 subsection_id 存储为 int 类型
             where = {
-                "subsection_id": int(subsection_id),
-                "source_type": "subsection"
+                "$and": [
+                    {"subsection_id": int(subsection_id)},
+                    {"source_type": "subsection"}
+                ]
             }
+            
+            logger.info(f"Querying Chroma with where clause: {where}")
+            
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=top_k,

@@ -31,13 +31,39 @@ def generate_interactive_quiz(
         chapter_ref_match = re.search(r'【参考：(.*?)】', topic)
         
         search_query = topic
+        target_subsection = None
+        
         if chapter_ref_match:
             # 如果有章节引用，直接使用章节标题作为搜索关键词，权重更高
-            search_query = chapter_ref_match.group(1)
+            search_query = chapter_ref_match.group(1).strip()
             logger.info(f"Detected chapter reference: {search_query}, using as primary search query.")
+        else:
+            # 如果没有 explicit reference，尝试把 topic 当作 subsection title
+            search_query = topic.strip()
+
+        # 尝试精确查找 SubSection
+        from app.models.subsection import SubSection
+        target_subsection = db.query(SubSection).filter(SubSection.title == search_query).first()
         
-        # Try to find relevant content based on topic
-        context, used_docs, _ = rag_service.get_context_for_query(query=search_query, max_length=3000)
+        context = ""
+        used_docs = []
+        
+        if target_subsection:
+            logger.info(f"Found specific subsection: {target_subsection.title} (ID: {target_subsection.id})")
+            # 使用针对 subsection 的精确检索
+            context, used_docs, _ = rag_service.get_context_for_subsection(
+                subsection_id=target_subsection.id,
+                max_length=3000
+            )
+            
+            # 如果没有找到内容（可能未向量化），尝试 fall back
+            if not context:
+                logger.warning(f"No context found for subsection {target_subsection.id}, falling back to general search.")
+        
+        if not context:
+            # Try to find relevant content based on topic (general search)
+            logger.info(f"Using general RAG search for query: {search_query}")
+            context, used_docs, _ = rag_service.get_context_for_query(query=search_query, max_length=3000)
         
         # If no context found, use the topic itself as context/instruction
         if not context:
@@ -45,6 +71,7 @@ def generate_interactive_quiz(
             context = f"Topic/Prompt: {topic}"
         else:
             logger.info(f"Found {len(used_docs)} documents for context.")
+
 
 
         # 2. Generate Quiz using LLM service
