@@ -480,8 +480,35 @@ class QuizService:
 
         for i, (question, user_answer) in enumerate(zip(questions, user_answers)):
             correct_answer = question.get('correct_answer')
+            # 优先获取 'question' 字段作为题目内容
+            # 如果 'question' 为空，尝试其他可能的字段 (兼容旧数据或特殊题型)
             question_text = question.get('question', '')
+            if not question_text:
+                if question.get('title'):
+                    question_text = question.get('title')
+                elif question.get('content'):
+                    question_text = question.get('content')
+                # 再次尝试从 meta.prompt 中解析 (兼容 WordTrainingService 生成的数据)
+                elif question.get('meta') and question.get('meta').get('prompt'):
+                    # 尝试从 prompt 中提取题目 (这是一个临时方案，最好是生成时就存好)
+                    # WordTrainingService 的 prompt 格式通常包含 "题目为选择题...题目内容应结合实际...出题形式例如：..."
+                    # 但 prompt 是给 AI 的指令，不是题目本身。
+                    # 真正的题目应该是 question_text 字段。
+                    # 如果 question_text 为空，说明生成或保存时出了问题。
+                    # 但既然用户提到了 question_text 在 Terminal#337-349 是 'My neighbor usually ______...'
+                    # 那说明数据本身是有 question_text 的。
+                    # 这里的代码逻辑看似没问题：question_text = question.get('question', '')
+                    # 为什么还会取不到呢？
+                    # 可能是因为 question 字典里的 key 不叫 'question'？
+                    # 但日志显示：Data: {'question_text': 'My neighbor usually...', ...}
+                    # 注意：日志里的 key 是 'question_text' 而不是 'question'！
+                    if question.get('question_text'):
+                        question_text = question.get('question_text')
 
+            # 记录调试日志
+            if not question_text:
+                 logger.warning(f"Question {i} has empty text! Data: {question}")
+            
             # 获取题目类型（优先使用question级别的quiz_type，用于综合练习）
             # 综合练习中每个题目可能有不同的类型
             question_quiz_type = question.get('quiz_type', quiz.quiz_type)
@@ -807,11 +834,92 @@ class QuizService:
             try:
                 logger.info(f"Using direct LLM check for {real_quiz_type}...")
                 if user_answer and str(user_answer).strip():
+                    # Determine score type based on quiz type and extra info
+                    score_type = "listening_check"
+                    
+                    # Normalize types for checking
+                    q_type_str = str(real_quiz_type).lower()
+                    target_item_str = str(extra_info.get('target_item', '')).lower() if extra_info else ""
+                    extra_type = str(extra_info.get('type', '')).lower() if extra_info else ""
+                    
+                    # 1. Check for Word/Vocabulary
+                    if q_type_str in ["vocabulary", "blank", "word"] or \
+                       q_type_str.startswith("vocabulary") or \
+                       q_type_str.startswith("word") or \
+                       extra_type == 'vocabulary':
+                        score_type = "word"
+                    
+                    # 2. Check for Grammar
+                    elif q_type_str in ["grammar"] or \
+                         q_type_str.startswith("grammar") or \
+                         extra_type == 'grammar' or \
+                         "grammar" in target_item_str or \
+                         "tense" in target_item_str or \
+                         "voice" in target_item_str or \
+                         "clause" in target_item_str or \
+                         "phrase" in target_item_str:
+                         score_type = "grammar"
+                    
+                    # 3. Fallback for "Choice" type: try to infer from target_item content
+                    elif q_type_str == "choice":
+                         # Heuristic: If target_item is NOT a single word (contains spaces) and score_type is not "word", try grammar
+                         if target_item_str and " " in target_item_str and score_type != "word":
+                             score_type = "grammar"
+                         # Even if target_item is a single word, if it's a choice question, it might be a grammar question about that word's usage
+                         # If we haven't decided on "word" type yet, lean towards "grammar" for detailed feedback if it's a choice question
+                         elif score_type == "listening_check":
+                             # Check if it is likely a vocabulary question
+                             # If target_item is present and is a single word, default to 'word' type
+                             if target_item_str and " " not in target_item_str and len(target_item_str) < 20:
+                                 score_type = "word"
+                             else:
+                                 score_type = "grammar"
+
+                    # 构建更完整的 question 字符串，包含知识点信息和选项
+                    final_question = question or f"{real_quiz_type} Check"
+                    
+                    # 添加选项信息，这对于选择题至关重要，否则AI不知道A/B/C/D代表什么
+                    # 注意：如果 question 字符串本身已经包含了选项（某些RAG生成的情况），这里可能会重复，
+                    # 但为了安全起见，我们还是附加上，AI通常能处理重复信息。
+                    if extra_info and (extra_info.get('options') or extra_info.get('choices')):
+                        options = extra_info.get('options') or extra_info.get('choices')
+                        
+                        # 检查 final_question 是否已经包含选项 (简单检查)
+                        has_options_in_text = "A." in final_question and "B." in final_question
+                        
+                        if not has_options_in_text:
+                            final_question += "\n\n【选项】："
+                            if isinstance(options, dict):
+                                for k, v in options.items():
+                                    final_question += f"\n{k}. {v}"
+                            elif isinstance(options, list):
+                                labels = ['A', 'B', 'C', 'D', 'E', 'F']
+                                for i, opt in enumerate(options):
+                                    label = labels[i] if i < len(labels) else str(i+1)
+                                    final_question += f"\n{label}. {opt}"
+
+                    if score_type == "grammar" and extra_info:
+                         target_item = extra_info.get('target_item')
+                         if target_item:
+                             final_question += f"\n\n【核心语法知识点】：{target_item}"
+                    elif score_type == "word" and extra_info:
+                         target_item = extra_info.get('target_item')
+                         # Fallback: 如果没有 target_item，尝试从 meta 中获取 word (兼容 WordTrainingService)
+                         if not target_item:
+                            meta = extra_info.get('meta', {})
+                            if meta and meta.get('word'):
+                                target_item = meta.get('word')
+                         if target_item:
+                             final_question += f"\n\n【核心词汇知识点】：{target_item}"
+                    
+                    # 记录调试日志，查看最终发送给LLM的问题内容
+                    logger.info(f"LLM Scoring - Type: {score_type}, Question: {final_question[:100]}...")
+
                     result = llm_service.semantic_score(
                         user_answer=str(user_answer),
                         correct_answer=str(correct_answer),
-                        question=question or f"{real_quiz_type} Check",
-                        score_type="listening_check"
+                        question=final_question,
+                        score_type=score_type
                     )
                     is_correct = result.get('is_correct', False)
                     feedback = result.get('feedback', "回答正确！" if is_correct else f"回答错误。正确答案是 {correct_answer}")

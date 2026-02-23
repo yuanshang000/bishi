@@ -1077,7 +1077,7 @@
     </el-dialog>
 
     <!-- 推荐训练历史练习详情对话框 (独立) -->
-    <el-dialog v-model="showRecommendedHistoryDetail" title="推荐训练详情" width="1000px" :close-on-click-modal="false" class="recommended-detail-dialog">
+    <el-dialog v-model="showRecommendedHistoryDetail" title="练习详情" width="1000px" :close-on-click-modal="false" class="recommended-detail-dialog">
       <div v-if="recommendedHistoryDetail">
         <!-- 练习基本信息 -->
         <el-descriptions :column="3" border style="margin-bottom: 20px;">
@@ -1107,7 +1107,7 @@
 
         <!-- 题目和答题情况 -->
         <el-divider content-position="left">
-          <h3>答题详情 (推荐训练)</h3>
+          <h3>答题详情</h3>
         </el-divider>
 
         <div v-if="!recommendedHistoryDetail.is_completed" class="not-completed-hint">
