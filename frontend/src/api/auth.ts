@@ -25,3 +25,8 @@ export const getCurrentUser = () => {
 export const getUserById = (userId: number) => {
   return request.get<User>(`/auth/users/${userId}`)
 }
+
+// 获取教师仪表盘统计数据
+export const getDashboardStats = () => {
+  return request.get<any>('/auth/dashboard/stats')
+}
