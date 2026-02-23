@@ -14,6 +14,7 @@ from app.models.chat import ChatHistory
 from app.models.wrong_question import WrongQuestion
 from app.models.knowledge_point import KnowledgePoint
 from app.models.user_word_stats import UserWordStats
+from app.models.user_knowledge_stats import UserKnowledgePointStats
 
 __all__ = [
     "User",
@@ -26,4 +27,5 @@ __all__ = [
     "WrongQuestion",
     "KnowledgePoint",
     "UserWordStats",
+    "UserKnowledgePointStats",
 ]

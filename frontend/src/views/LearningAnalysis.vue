@@ -81,10 +81,10 @@
             <el-col :xs="24" :sm="12" :md="6">
               <el-card shadow="hover" class="stat-card">
                 <div class="stat-content">
-                  <el-icon :size="32" color="#67C23A"><Medal /></el-icon>
+                  <el-icon :size="32" color="#67C23A"><Edit /></el-icon>
                   <div class="stat-info">
-                    <div class="stat-value">{{ analysisData.data.average_score.toFixed(1) }}</div>
-                    <div class="stat-label">平均分</div>
+                    <div class="stat-value">{{ analysisData.data.total_questions || 0 }}</div>
+                    <div class="stat-label">累计答题</div>
                   </div>
                 </div>
               </el-card>
@@ -97,8 +97,8 @@
                     <component :is="getTrendIcon(analysisData.data.trend)" />
                   </el-icon>
                   <div class="stat-info">
-                    <div class="stat-value">{{ analysisData.data.recent_average.toFixed(1) }}</div>
-                    <div class="stat-label">最近表现</div>
+                    <div class="stat-value">{{ analysisData.data.overall_accuracy || 0 }}%</div>
+                    <div class="stat-label">综合正确率</div>
                   </div>
                 </div>
               </el-card>
@@ -109,8 +109,8 @@
                 <div class="stat-content">
                   <el-icon :size="32" color="#E6A23C"><Warning /></el-icon>
                   <div class="stat-info">
-                    <div class="stat-value">{{ analysisData.data.weak_points.length }}</div>
-                    <div class="stat-label">薄弱知识点</div>
+                    <div class="stat-value">{{ totalWeakPointsCount }}</div>
+                    <div class="stat-label">总薄弱知识点</div>
                   </div>
                 </div>
               </el-card>
@@ -244,7 +244,7 @@
               <div class="card-header">
                 <div class="header-left">
                   <el-icon><Warning /></el-icon>
-                  <span>薄弱知识点详情 (未达标小节)</span>
+                  <span>薄弱知识点详情 (平均分 < 60分)</span>
                 </div>
                 <el-button
                   type="primary"
@@ -326,18 +326,7 @@
             </el-table>
           </el-card>
 
-          <!-- 详细报告 -->
-          <el-card class="report-card" shadow="hover" style="margin-top: 20px;">
-            <template #header>
-              <div class="card-header">
-                <el-icon><Document /></el-icon>
-                <span>详细分析报告</span>
-              </div>
-            </template>
-            <div class="report-content">
-              <pre>{{ analysisData.report }}</pre>
-            </div>
-          </el-card>
+
 
           <!-- 综合练习答题界面 -->
           <el-card v-if="currentQuiz" class="quiz-card" shadow="hover" style="margin-top: 20px">
@@ -480,19 +469,19 @@
 import { getGoalProgress, getMyLearningAnalysis, submitQuiz } from '@/api'
 import type { AIAnalysisResult } from '@/types'
 import {
-    Bottom,
-    DataAnalysis,
-    Document,
-    Edit,
-    FullScreen,
-    List,
-    Loading,
-    Medal,
-    Minus,
-    Refresh,
-    Top,
-    TrendCharts,
-    Warning
+  Bottom,
+  DataAnalysis,
+  Document,
+  Edit,
+  FullScreen,
+  List,
+  Loading,
+  Medal,
+  Minus,
+  Refresh,
+  Top,
+  TrendCharts,
+  Warning
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { ElMessage, ElNotification } from 'element-plus'
@@ -576,7 +565,8 @@ const initCharts = () => {
   const subsectionMastery = analysisData.value?.data.subsection_mastery || []
   
   // 显示全部数据（移除 slice(0, 20)），让滚动条来控制显示数量
-  const displayData = subsectionMastery
+  // 只显示有做题数据的章节
+  const displayData = subsectionMastery.filter((item: any) => item.has_data)
   
   const yAxisData = displayData.map((item: any) => {
       // 构建富文本标签
@@ -764,6 +754,7 @@ const questions = ref<any[]>([])
 const userAnswers = ref<any[]>([])
 const showResult = ref(false)
 const result = ref<any>({})
+const totalWeakPointsCount = ref(0)
 
 // 页面加载时自动分析
 onMounted(() => {
@@ -781,6 +772,15 @@ const analyzeMyLearning = async () => {
     
     // res 的结构是 { success, report, data }
     analysisData.value = res  // 存储整个响应
+    
+    // 计算所有薄弱小节中的具体薄弱点总数
+    if (res.data && res.data.weak_points) {
+      totalWeakPointsCount.value = res.data.weak_points.reduce((sum: number, item: any) => {
+        return sum + (item.weak_details ? item.weak_details.length : 0)
+      }, 0)
+    } else {
+      totalWeakPointsCount.value = 0
+    }
     
     if (progressRes.success) {
       goalProgress.value = progressRes.data
@@ -1214,26 +1214,6 @@ const getScoreColor = (score: number): string => {
   margin-top: 5px;
 }
 
-.report-card {
-  margin-bottom: 20px;
-}
-
-.report-content {
-  padding: 10px;
-  background-color: #f5f7fa;
-  border-radius: 4px;
-}
-
-.report-content pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #303133;
-}
 
 .weak-points-card {
   margin-bottom: 20px;

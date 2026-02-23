@@ -17,6 +17,7 @@ from app.models.section import Section
 from app.models.subsection import SubSection
 from app.models.quiz import QuizRecord
 from app.models.knowledge_point import KnowledgePoint
+from app.models.user_knowledge_stats import UserKnowledgePointStats
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func
 
@@ -193,8 +194,181 @@ class AIAnalysisService:
     async def get_weak_points_detail(self, db: Session, student_id: int) -> List[Dict[str, Any]]:
         """
         获取详细的薄弱知识点分析
-        仅包含平均分 < 60 的小节，并列出其中的高频错误知识点
+        
+        逻辑说明：
+        1. 小节是否“薄弱”：优先依据 QuizRecord 中的练习平均分（与“目标完成情况”图表一致）。
+           如果该小节没有 QuizRecord 记录（例如仅通过全章节练习覆盖），则回退使用 UserKnowledgePointStats 的聚合正确率。
+           阈值：平均分 < 60 分。
+           
+        2. 具体薄弱点：依据 UserKnowledgePointStats 表中的精准统计。
+           阈值：知识点正确率 < 60%。
         """
+        
+        # --- Step 1: 计算小节的 Quiz 平均分 (为了与图表数据对齐) ---
+        quiz_records = db.query(QuizRecord).filter(
+            QuizRecord.user_id == student_id,
+            QuizRecord.is_completed == 1,
+            QuizRecord.subsection_id.isnot(None)
+        ).all()
+        
+        subsection_quiz_stats = {}
+        for qr in quiz_records:
+            sid = qr.subsection_id
+            if sid not in subsection_quiz_stats:
+                subsection_quiz_stats[sid] = {"total_acc": 0, "count": 0}
+            subsection_quiz_stats[sid]["total_acc"] += (qr.accuracy or 0)
+            subsection_quiz_stats[sid]["count"] += 1
+
+        # --- Step 2: 获取具体的知识点统计 ---
+        stats_query = db.query(UserKnowledgePointStats, KnowledgePoint).join(
+            KnowledgePoint, UserKnowledgePointStats.knowledge_point_id == KnowledgePoint.id
+        ).filter(
+            UserKnowledgePointStats.user_id == student_id,
+            UserKnowledgePointStats.total_attempts > 0
+        ).all()
+
+        results = []
+        
+        if stats_query:
+            # 按小节聚合统计
+            subsection_map = {}
+            
+            for u_stat, kp in stats_query:
+                if not kp.subsection_id:
+                    continue
+                    
+                sid = kp.subsection_id
+                if sid not in subsection_map:
+                    subsection_map[sid] = {
+                        "total_attempts": 0,
+                        "correct_attempts": 0,
+                        "kp_list": []
+                    }
+                
+                subsection_map[sid]["total_attempts"] += u_stat.total_attempts
+                subsection_map[sid]["correct_attempts"] += u_stat.correct_attempts
+                subsection_map[sid]["kp_list"].append((u_stat, kp))
+            
+            # 分析每个小节
+            for sid, data in subsection_map.items():
+                # 计算小节分数
+                # 优先使用 QuizRecord 的数据（用户视角的小节平均分）
+                if sid in subsection_quiz_stats:
+                    s_stats = subsection_quiz_stats[sid]
+                    avg_accuracy = s_stats["total_acc"] / s_stats["count"]
+                    source_type = "quiz_record"
+                else:
+                    # Fallback: 使用 KP 聚合数据
+                    avg_accuracy = (data["correct_attempts"] / data["total_attempts"]) * 100
+                    source_type = "kp_stats"
+                
+                # 核心过滤：只显示不及格的小节 (< 60)
+                if avg_accuracy >= 60:
+                    continue
+                
+                # 获取小节信息
+                subsection = db.query(SubSection).options(
+                    joinedload(SubSection.section).joinedload(Section.chapter)
+                ).filter(SubSection.id == sid).first()
+                
+                if not subsection:
+                    continue
+                    
+                chapter_num = subsection.section.chapter.chapter_number if subsection.section and subsection.section.chapter else "?"
+                
+                # 提取该小节下的具体薄弱知识点
+                sub_weak_points = []
+                
+                # 类型映射
+                type_map = {
+                    "word": "单词",
+                    "grammar": "语法",
+                    "phrase": "短语",
+                    "sentence": "句型"
+                }
+                
+                # 聚合同一知识点的统计数据 (防御性编程：防止数据库中存在重复记录导致显示重复项)
+                kp_agg_map = {}
+                
+                for u_stat, kp in data["kp_list"]:
+                    if u_stat.total_attempts == 0:
+                        continue
+                        
+                    kp_id = kp.id
+                    if kp_id not in kp_agg_map:
+                        kp_agg_map[kp_id] = {
+                            "kp": kp,
+                            "total_attempts": 0,
+                            "correct_attempts": 0
+                        }
+                    
+                    kp_agg_map[kp_id]["total_attempts"] += u_stat.total_attempts
+                    kp_agg_map[kp_id]["correct_attempts"] += u_stat.correct_attempts
+                
+                # 处理聚合后的数据
+                for kp_id, agg_data in kp_agg_map.items():
+                    kp = agg_data["kp"]
+                    total = agg_data["total_attempts"]
+                    correct = agg_data["correct_attempts"]
+                    
+                    if total == 0:
+                        continue
+                        
+                    kp_acc = correct / total
+                    
+                    if kp_acc < 0.6: # 知识点正确率低于 60%
+                        # 转换类型为中文
+                        display_type = type_map.get(kp.type, kp.type)
+                        
+                        sub_weak_points.append({
+                            "knowledge_point_id": kp.content,
+                            "type": display_type,
+                            "error_count": total - correct,
+                            "accuracy": round(kp_acc * 100, 1),
+                            "total_attempts": total
+                        })
+                
+                # 只有当确实存在具体薄弱点时才显示（符合用户描述：小节不及格 -> 必有具体薄弱点）
+                # 理论上如果小节不及格，通常会有 KP 不及格。但为了数据展示的严谨性，这里还是要做个判断。
+                # 如果小节不及格（比如 53分），但具体 KP 统计都 > 60%（极端情况，比如 Quiz 扣分在非 KP 题上），
+                # 这种情况下显示一个空列表可能比较奇怪。但根据用户要求，我们还是列出来。
+                
+                if sub_weak_points:
+                    # 按正确率排序
+                    sub_weak_points.sort(key=lambda x: x['accuracy'])
+                    
+                    # 生成建议
+                    suggestion = "建议加强练习"
+                    types = set(wp['type'] for wp in sub_weak_points)
+                    if '单词' in types:
+                        suggestion += "，重点记忆单词拼写和词义"
+                    if '语法' in types:
+                        suggestion += "，复习相关语法规则和例句"
+                    if '短语' in types:
+                        suggestion += "，注意短语搭配"
+                    
+                    results.append({
+                        "knowledge_point_id": f"第{chapter_num}章 - {subsection.title}",
+                        "average_score": round(avg_accuracy, 1),
+                        "accuracy": round(avg_accuracy, 1),
+                        "error_count": data["total_attempts"] - data["correct_attempts"], # 这里显示的是 KP 维度的总错题数
+                        "total_questions": data["total_attempts"],
+                        "severity": "high",
+                        "severity_text": "未达标",
+                        "related_chapters": [chapter_num],
+                        "weak_details": sub_weak_points[:5],
+                        "suggestion": suggestion
+                    })
+            
+            # 如果基于统计表分析出了结果，直接返回
+            if results:
+                return results
+            else:
+                # 如果统计表有数据但没有薄弱点（即所有知识点正确率都>=60%），则返回空列表
+                # 不再执行 Fallback 逻辑，因为 Fallback 逻辑可能会从历史旧数据中提取出不准确的薄弱点
+                return []
+
+        # 2. Fallback: 如果统计表没数据（兼容旧数据），使用旧的基于 QuizRecord 的逻辑
         # 1. 获取所有小节的练习统计
         records = db.query(QuizRecord).filter(
             QuizRecord.user_id == student_id,
@@ -227,7 +401,6 @@ class AIAnalysisService:
             return []
             
         # 2. 遍历不及格小节，查询详细错误点
-        results = []
         for sub_info in weak_subsections:
             sub_id = sub_info["id"]
             avg_score = sub_info["avg_score"]
@@ -242,78 +415,86 @@ class AIAnalysisService:
                 
             chapter_num = subsection.section.chapter.chapter_number if subsection.section and subsection.section.chapter else "?"
             
-            # 查询该小节下的薄弱知识点
-            # 策略：查询 KnowledgePoint 表，按错误率或连续错误次数排序
-            kps = db.query(KnowledgePoint).filter(
-                KnowledgePoint.subsection_id == sub_id,
-                KnowledgePoint.total_attempts > 0 # 只有做过的才统计
-            ).all()
-            
-            # 计算错误率并排序
+            # 旧逻辑：尝试从 QuizRecord.questions 中提取错题
             sub_weak_points = []
-            for kp in kps:
-                accuracy = kp.correct_attempts / kp.total_attempts if kp.total_attempts > 0 else 0
-                # 如果正确率低于 60% 或者 连续做错次数 > 0
-                if accuracy < 0.6 or kp.consecutive_errors > 0:
-                    sub_weak_points.append({
-                        "knowledge_point_id": kp.content, # 前端显示用 content
-                        "type": kp.type,
-                        "error_count": kp.total_attempts - kp.correct_attempts,
-                        "accuracy": round(accuracy * 100, 1),
-                        "total_attempts": kp.total_attempts
-                    })
-            
-            # 排序：错误率越低越前
-            sub_weak_points.sort(key=lambda x: x['accuracy'])
-            
-            # 如果 KnowledgePoint 表没有足够数据，尝试从 QuizRecord.questions 中提取错题（作为补充）
-            if not sub_weak_points:
-                try:
-                    # 查找该小节的最近错题记录
-                    wrong_records = db.query(QuizRecord).filter(
-                        QuizRecord.subsection_id == sub_id,
-                        QuizRecord.user_id == student_id,
-                        QuizRecord.score < 60  # 只看低分的记录
-                    ).order_by(QuizRecord.created_at.desc()).limit(5).all()
+            try:
+                # 查找该小节的最近错题记录
+                wrong_records = db.query(QuizRecord).filter(
+                    QuizRecord.subsection_id == sub_id,
+                    QuizRecord.user_id == student_id,
+                    QuizRecord.score < 60  # 只看低分的记录
+                ).order_by(QuizRecord.created_at.desc()).limit(10).all() # 增加 limit 以获取更多样本进行聚合
+                
+                # 聚合统计 (Content -> Stats)
+                aggregation = {}
+
+                for wr in wrong_records:
+                    qs = json.loads(wr.questions) if isinstance(wr.questions, str) else wr.questions
+                    rs = json.loads(wr.results) if isinstance(wr.results, str) else wr.results
                     
-                    for wr in wrong_records:
-                        qs = json.loads(wr.questions) if isinstance(wr.questions, str) else wr.questions
-                        rs = json.loads(wr.results) if isinstance(wr.results, str) else wr.results
-                        
-                        if qs and rs and isinstance(rs, list) and isinstance(qs, list):
-                            for i, res in enumerate(rs):
-                                if i < len(qs) and not res.get("is_correct"):
-                                    q_item = qs[i]
-                                    # 尝试获取题目文本
-                                    q_content = q_item.get("question") or q_item.get("question_text") or "未知题目"
-                                    # 截断过长的题目
-                                    if len(q_content) > 30:
-                                        q_content = q_content[:30] + "..."
-                                    
-                                    sub_weak_points.append({
-                                        "knowledge_point_id": q_content,
-                                        "type": "错题",
-                                        "error_count": 1,
-                                        "accuracy": 0,
-                                        "total_attempts": 1
-                                    })
-                except Exception as e:
-                    logger.warning(f"Failed to extract wrong questions for subsection {sub_id}: {e}")
+                    if qs and rs and isinstance(rs, list) and isinstance(qs, list):
+                        for i, res in enumerate(rs):
+                            if i < len(qs) and not res.get("is_correct"):
+                                q_item = qs[i]
+                                
+                                # 1. 尝试获取核心知识点内容 (target_item > meta.word > question)
+                                content = q_item.get("target_item")
+                                kp_type = "语法" # 默认为语法（如果不是单词的话）
+                                
+                                if not content:
+                                    meta = q_item.get("meta", {})
+                                    if meta and meta.get("word"):
+                                        content = meta.get("word")
+                                        kp_type = "单词"
+                                else:
+                                    # 如果有 target_item，尝试判断类型
+                                    # 简单判断：如果是纯英文单词，可能是单词；否则是语法
+                                    if content.replace(" ", "").isalpha() and len(content.split()) <= 3:
+                                         kp_type = "单词"
+                                
+                                if not content:
+                                    # 最后的兜底：尝试从题目文本中提取 (仅限特定格式)
+                                    q_text = q_item.get("question") or q_item.get("question_text") or "未知题目"
+                                    # 如果是"单词默写..."这种格式，尝试提取引号内的内容
+                                    import re
+                                    match = re.search(r"['\"](.*?)['\"]", q_text)
+                                    if match:
+                                        content = match.group(1) # 提取"负责的"
+                                        kp_type = "推测词汇"
+                                    else:
+                                        # 截断过长的题目作为标识
+                                        content = q_text[:30] + "..." if len(q_text) > 30 else q_text
+                                        kp_type = "错题"
+
+                                # 2. 聚合
+                                if content not in aggregation:
+                                    aggregation[content] = {
+                                        "type": kp_type,
+                                        "error_count": 0,
+                                        "total_attempts": 0,
+                                        "correct_attempts": 0
+                                    }
+                                aggregation[content]["error_count"] += 1
+                                aggregation[content]["total_attempts"] += 1
+                
+                # 3. 转换为列表
+                for content, stats in aggregation.items():
+                    sub_weak_points.append({
+                        "knowledge_point_id": content,
+                        "type": stats["type"],
+                        "error_count": stats["error_count"],
+                        "accuracy": 0, # 既然是错题提取，暂定为0 (或可进一步分析正确记录来计算，但这里是fallback)
+                        "total_attempts": stats["total_attempts"]
+                    })
+                
+                # 4. 排序：错误次数从高到低
+                sub_weak_points.sort(key=lambda x: x['error_count'], reverse=True)
+
+            except Exception as e:
+                logger.warning(f"Failed to extract wrong questions for subsection {sub_id}: {e}")
             
             # 生成建议
-            suggestion = "建议加强练习"
-            if sub_weak_points:
-                types = set(wp['type'] for wp in sub_weak_points)
-                if 'word' in types:
-                    suggestion += "，重点记忆单词拼写和词义"
-                if 'grammar' in types:
-                    suggestion += "，复习相关语法规则和例句"
-                if 'phrase' in types:
-                    suggestion += "，注意短语搭配"
-                if '错题' in types:
-                    suggestion += "，回顾错题解析，理解解题思路"
-            else:
-                 suggestion += "，建议重新复习本小节内容，查漏补缺"
+            suggestion = "建议加强练习，回顾错题解析，理解解题思路"
 
             results.append({
                 "knowledge_point_id": f"第{chapter_num}章 - {subsection.title}", # 借用字段名显示标题
@@ -431,6 +612,19 @@ class AIAnalysisService:
         # 计算平均分和趋势
         scores = [r["score"] for r in records]
         avg_score = sum(scores) / len(scores)
+
+        # 累计答题数
+        total_questions_count = sum(len(r.get("questions", [])) for r in records)
+
+        # 综合正确率
+        total_correct_count = 0
+        for r in records:
+            results_list = r.get("results", [])
+            for res in results_list:
+                if res.get("is_correct", False):
+                    total_correct_count += 1
+        
+        overall_accuracy = (total_correct_count / total_questions_count * 100) if total_questions_count > 0 else 0.0
 
         # 最近3次的平均分（趋势）
         recent_scores = scores[:min(3, len(scores))]
@@ -684,6 +878,8 @@ class AIAnalysisService:
         return {
             "status": "success",
             "total_records": total_records,
+            "total_questions": total_questions_count,  # 累计答题数
+            "overall_accuracy": round(overall_accuracy, 1), # 综合正确率
             "average_score": round(avg_score, 2),
             "recent_average": round(recent_avg, 2),
             "trend": trend,

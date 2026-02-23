@@ -929,12 +929,14 @@ class LLMService:
 2. **题目必须考察文档中的核心知识点（词汇辨析、语法应用、词性判断等）**
 3. **选项必须具有干扰性，但只有一个正确答案**
 4. **出题目的是检验学生对文档内容的掌握**
+5. **每道题必须明确标注 target_item（考察的核心知识点/词汇/短语）**
 
 **返回格式（JSON数组）：**
 [
   {{
     "question": "题干内容...",
     "quiz_type": "choice",
+    "target_item": "被考察的核心词汇或知识点（必填）",
     "options": {{"A": "选项1", "B": "选项2", "C": "选项3", "D": "选项4"}},
     "correct_answer": "A",
     "explanation": "解析：考察了...知识点"
@@ -970,7 +972,8 @@ class LLMService:
    - 必须包含**词义辨析题**（Choice）：看英文选中文，或看中文选英文。
    - 必须包含**拼写/形式题**（Blank）：给出语境或中文提示，让学生填写单词（考察拼写）。
    - **对于同一个核心词，尽量生成多角度的题目（一题考意义，一题考拼写），以达到"多方面检测"的目的。**
-4. **题干形式**：
+4. **每道题必须明确标注 target_item（考察的核心知识点/词汇/短语）**
+5. **题干形式**：
    - **简单难度/基础达标**：
      - Choice: "Select the Chinese meaning of 'apple'."
      - Blank: "The red fruit is an a______ (apple)." (First letter hint allowed)
@@ -981,6 +984,7 @@ class LLMService:
   {{
     "question": "The meeting was _____ due to the weather.",
     "quiz_type": "vocabulary",
+    "target_item": "cancel",
     "options": {{"A": "cancelled", "B": "cancel", "C": "cancelling", "D": "cancellation"}},
     "correct_answer": "A",
     "explanation": "解析：考察了...词汇/语法"
@@ -988,6 +992,7 @@ class LLMService:
   {{
     "question": "Please write the word for: 苹果 (Start with 'a')",
     "quiz_type": "blank", 
+    "target_item": "apple",
     "correct_answer": "apple",
     "explanation": "解析：考察了单词拼写"
   }}
@@ -1044,6 +1049,7 @@ class LLMService:
 **绝对强制要求：**
 1. **优先遵循文档中的【特别指令】**
 2. **对于同一个核心词，尽量生成一题听音选择，一题听音默写，以达到全方位检测的目的。**
+3. **每道题必须明确标注 target_item（考察的核心知识点/词汇/短语）**
 
 **返回格式（JSON数组）：**
 
@@ -1052,6 +1058,7 @@ class LLMService:
   {{
     "question": "请听录音，选出你听到的单词（多选）。",
     "quiz_type": "listening",
+    "target_item": "apple",
     "audio_text": "apple",
     "options": ["apple", "apply", "ample", "appeal"], 
     "correct_answer": ["apple"],
@@ -1060,6 +1067,7 @@ class LLMService:
   {{
     "question": "Listen and write the word you hear (Dictation).",
     "quiz_type": "blank",
+    "target_item": "apple",
     "audio_text": "apple",
     "correct_answer": "apple",
     "explanation": "解析：单词拼写为 a-p-p-l-e。"
@@ -1095,6 +1103,7 @@ class LLMService:
 2. **文章内容必须要用到文档里面的知识内容，没有必要文章内容要和文档相关，只是需要用到文档里面的知识去构成对话内容**
 3. **根据文章内容，灵活出题考察文档里面的主要知识内容且不能照搬文档的内容出题**
 4. **出题的目的是检验答题人对文档核心知识内容的理解和掌握程度**
+5. **每道题必须明确标注 target_item（考察的核心知识点/词汇/短语）**
 
 **验证方法：**
 出题后，检查文章：
@@ -1107,6 +1116,7 @@ class LLMService:
     "passage": "阅读文章（必须使用理解后的文档主要知识点构成文章）",
     "question": "根据文章和知识点设计的问题",
     "quiz_type": "reading",
+    "target_item": "考察的知识点",
     "options": {{"A": "选项1", "B": "选项2", "C": "选项3", "D": "选项4"}},
     "correct_answer": "B",
     "explanation": "考察的是哪个短语动词或语法。"
@@ -1140,6 +1150,7 @@ class LLMService:
 2. **给出的中文句子必须要用到文档里面的知识内容**
 3. **灵活出题考察文档里面的主要知识内容且不能照搬文档的内容出题**
 4. **出题的目的是检验答题人对文档核心知识内容的理解和掌握程度**
+5. **每道题必须明确标注 target_item（考察的核心知识点/词汇/短语）**
 
 **验证方法：**
 出题后，检查句子：
@@ -1151,6 +1162,7 @@ class LLMService:
   {{
     "question": "中文句子",
     "quiz_type": "translation",
+    "target_item": "考察的核心词汇",
     "correct_answer": "英文翻译（必须使用文档核心词汇/语法）",
     "key_points": ["考察的核心词汇1", "考察的核心语法"],
     "explanation": "考察的是..."
@@ -2359,7 +2371,7 @@ class LLMService:
       "type": "vocabulary",
       "quiz_type": "choice", 
       "difficulty": "{difficulty}",
-      "target_item": "ambitious",
+      "target_item": "必须与Input Data中提供的原始字符串完全一致",
       "question": "He is very ______...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}}, 
       "correct_answer": "A",
@@ -2426,7 +2438,7 @@ options字段如果是选择题，请返回字典格式 {{"A": "...", "B": "..."
                 if zh_match:
                     zh = zh_match.group(0)
                 if m_word:
-                    words.append({"en": m_word[0], "zh": zh})
+                    words.append({"en": m_word[0], "zh": zh, "original_content": c})
         words = [w for w in words if w.get("en")]
         if not words:
             return []
@@ -2446,6 +2458,7 @@ options字段如果是选择题，请返回字典格式 {{"A": "...", "B": "..."
                 items.append({
                     "question": f"选择 {w['en']} 的中文意思",
                     "quiz_type": "vocabulary",
+                    "target_item": w.get("original_content", w['en']),
                     "options": options,
                     "correct_answer": correct_key,
                     "explanation": f"考察词汇：{w['en']}"
@@ -2455,6 +2468,7 @@ options字段如果是选择题，请返回字典格式 {{"A": "...", "B": "..."
                 items.append({
                     "question": f"请写出表示“{w.get('zh','该词') }”的英文单词（以 '{hint}' 开头）",
                     "quiz_type": "blank",
+                    "target_item": w.get("original_content", w['en']),
                     "correct_answer": w["en"],
                     "explanation": f"考察拼写：{w['en']}"
                 })

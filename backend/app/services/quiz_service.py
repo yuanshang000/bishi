@@ -17,8 +17,11 @@ from app.models.section import Section
 from app.models.subsection import SubSection
 from app.models.wrong_question import WrongQuestion
 from app.models.knowledge_point import KnowledgePoint
+from app.models.user_knowledge_stats import UserKnowledgePointStats
+from app.models.user_word_stats import UserWordStats
 from app.models.document import CourseDocument
 from app.services.llm_service import llm_service
+from app.core.config import settings
 from app.services.rag_service import rag_service
 from app.services.tts_service import tts_service
 
@@ -471,6 +474,9 @@ class QuizService:
         correct_count = 0
         total_score = 0.0
         results = []
+        
+        # 缓存本次提交中涉及的 UserKnowledgePointStats 对象，避免重复查询/创建导致的主键冲突或重复数据
+        stats_cache = {}
 
         for i, (question, user_answer) in enumerate(zip(questions, user_answers)):
             correct_answer = question.get('correct_answer')
@@ -498,14 +504,143 @@ class QuizService:
             # 智能分批策略：更新知识点分数 (Knowledge Point Score Update)
             # -----------------------------------------------------------------
             target_item = question.get('target_item')
+            
+            # Fallback: 如果没有 target_item，尝试从 meta 中获取 word (兼容 WordTrainingService)
+            if not target_item:
+                meta = question.get('meta', {})
+                if meta and meta.get('word'):
+                    target_item = meta.get('word')
 
-            if target_item and quiz.subsection_id:
-                kp = db.query(KnowledgePoint).filter(
-                    KnowledgePoint.subsection_id == quiz.subsection_id,
-                    KnowledgePoint.content == target_item
-                ).first()
+            if target_item:
+                logger.info(f"Processing knowledge point stats for target_item: {target_item}")
+                kp = None
+                
+                # 辅助函数：根据条件查找 KP
+                def find_kp(t_item):
+                    if not t_item:
+                        return None
+                        
+                    # 预处理：去除首尾空格
+                    t_item = t_item.strip()
+                    
+                    # 定义查找逻辑 (封装以便复用于带scope和不带scope的情况)
+                    def search_logic(query_base):
+                        # 1. 精确匹配 (Case-insensitive)
+                        # SQLite 默认 case-insensitive for ASCII, 但为了保险使用 func.lower
+                        from sqlalchemy import func
+                        found = query_base.filter(func.lower(KnowledgePoint.content) == func.lower(t_item)).first()
+                        if found:
+                            return found
+                        
+                        # 2. 尝试前缀匹配 (e.g. "apple" -> "apple (n. 苹果)")
+                        # 仅当 t_item 是纯英文单词时尝试
+                        if t_item.replace(" ", "").isalpha():
+                             # Case-insensitive prefix match
+                             found = query_base.filter(KnowledgePoint.content.ilike(f"{t_item} %")).first()
+                             if found:
+                                 return found
+                             found = query_base.filter(KnowledgePoint.content.ilike(f"{t_item}(%")).first()
+                             if found:
+                                 return found
+
+                        # 3. 尝试包含匹配 (e.g. "apple (n. 苹果)" -> "apple")
+                        # 提取 t_item 中的英文单词
+                        import re
+                        match = re.match(r'^([a-zA-Z\s\-]+)', t_item)
+                        if match:
+                            core_word = match.group(1).strip()
+                            if core_word and len(core_word) > 2:
+                                # Try to match if KP content starts with this core word
+                                found = query_base.filter(KnowledgePoint.content.ilike(f"{core_word}%")).first()
+                                if found:
+                                    return found
+                        
+                        # 4. Try matching the first line (for Grammar KPs where content might be multiline in target_item)
+                        if "\n" in t_item:
+                            first_line = t_item.split("\n")[0].strip()
+                            # Try exact match of first line
+                            found = query_base.filter(KnowledgePoint.content == first_line).first()
+                            if found:
+                                return found
+                            # Try prefix match of first line
+                            found = query_base.filter(KnowledgePoint.content.ilike(f"{first_line}%")).first()
+                            if found:
+                                return found
+
+                        return None
+
+                    # 策略1：在当前Scope（小节/章节）内查找
+                    query = db.query(KnowledgePoint)
+                    if quiz.subsection_id:
+                        query = query.filter(KnowledgePoint.subsection_id == quiz.subsection_id)
+                    elif quiz.chapter_id:
+                        query = query.join(SubSection).join(Section).filter(Section.chapter_id == quiz.chapter_id)
+                    
+                    kp_found = search_logic(query)
+                    if kp_found:
+                        return kp_found
+                        
+                    # 策略2：如果Scope内没找到，尝试全局查找 (Fallback)
+                    # 有时候题目生成的知识点可能属于其他章节（或者是复习题）
+                    logger.info(f"KP '{t_item}' not found in scope, trying global search...")
+                    kp_found = search_logic(db.query(KnowledgePoint))
+                    
+                    return kp_found
+
+                kp = find_kp(target_item)
                 
                 if kp:
+                    logger.info(f"Found KnowledgePoint ID: {kp.id} for {target_item}")
+                    
+                    # 2. 更新或创建用户知识点统计 (UserKnowledgePointStats)
+                    # 优先从缓存获取，避免同一批次提交中重复创建
+                    cache_key = f"{user_id}_{kp.id}"
+                    user_kp_stat = stats_cache.get(cache_key)
+                    
+                    if not user_kp_stat:
+                        user_kp_stat = db.query(UserKnowledgePointStats).filter(
+                            UserKnowledgePointStats.user_id == user_id,
+                            UserKnowledgePointStats.knowledge_point_id == kp.id
+                        ).first()
+
+                        if not user_kp_stat:
+                            user_kp_stat = UserKnowledgePointStats(
+                                user_id=user_id,
+                                knowledge_point_id=kp.id,
+                                total_attempts=0,
+                                correct_attempts=0,
+                                consecutive_errors=0,
+                                consecutive_corrects=0,
+                                mastery_score=0.0
+                            )
+                            db.add(user_kp_stat)
+                        
+                        # 加入缓存
+                        stats_cache[cache_key] = user_kp_stat
+                    
+                    # 更新统计数据
+                    user_kp_stat.total_attempts += 1
+                    user_kp_stat.last_reviewed_at = datetime.utcnow()
+
+                    if item_score >= 0.9:
+                        # 做对 (Correct)
+                        user_kp_stat.correct_attempts += 1
+                        user_kp_stat.consecutive_errors = 0
+                        user_kp_stat.consecutive_corrects += 1
+                        # 掌握度加分 (简单算法)
+                        user_kp_stat.mastery_score = min(100.0, user_kp_stat.mastery_score + 10.0)
+                    elif item_score >= 0.4:
+                        # 半对 (Half-correct)
+                        user_kp_stat.consecutive_errors = 0
+                        user_kp_stat.consecutive_corrects = 0
+                        user_kp_stat.mastery_score = max(0.0, user_kp_stat.mastery_score - 5.0)
+                    else:
+                        # 做错 (Wrong)
+                        user_kp_stat.consecutive_errors += 1
+                        user_kp_stat.consecutive_corrects = 0
+                        user_kp_stat.mastery_score = max(0.0, user_kp_stat.mastery_score - 15.0)
+                    
+                    # 同时也更新 KnowledgePoint 表的总体统计 (可选，作为全局参考)
                     # A. 防死循环机制 (Anti-Death-Loop)
                     if kp.consecutive_errors >= 3:
                         # 强制冷却
@@ -515,16 +650,12 @@ class QuizService:
                     else:
                         # B. 基础分数变更
                         if item_score >= 0.9:
-                            # 做对 (Correct)
-                            # score += 0.0 (不变)
                             kp.consecutive_errors = 0
                             kp.correct_attempts += 1
                         elif item_score >= 0.4:
-                            # 半对 (Half-correct)
                             kp.priority_score -= 0.5
                             kp.consecutive_errors = 0
                         else:
-                            # 做错 (Wrong)
                             kp.priority_score -= 1.0
                             kp.consecutive_errors += 1
                     
