@@ -203,7 +203,7 @@
                 
                 <div class="quiz-actions-large">
                   <el-button type="primary" size="large" @click="handleGenerateQuiz" :loading="loading" :disabled="!quizPrompt.trim()">
-                    <el-icon class="el-icon--left"><Loading v-if="loading" /><Picture v-else /></el-icon>
+                    <el-icon class="el-icon--left" v-if="!loading"><Picture /></el-icon>
                     生成题目
                   </el-button>
                 </div>
@@ -486,6 +486,18 @@ const openQuizFromMessage = (msg: any) => {
     showQuizModal.value = true
   }
 }
+
+watch(mode, (newMode) => {
+  if (newMode === 'chat') {
+    nextTick(() => {
+      scrollToBottom()
+      // 额外延迟滚动，确保在DOM完全就绪后滚动到底部
+      setTimeout(() => {
+        scrollToBottom()
+      }, 100)
+    })
+  }
+})
 
 watch(inputMessage, async (newVal) => {
   if (newVal.endsWith('#') || newVal.endsWith('＃')) {
@@ -922,7 +934,31 @@ const handleGenerateQuiz = async () => {
        quizData.value = quizJson
        showQuizModal.value = true
        ElMessage.success('题目生成成功！')
-       // 成功生成题目后，不将消息添加到聊天记录中，保持出题模式的纯净
+       
+       // 手动将题目消息添加到聊天记录中，以便切换回聊天模式时可以看到
+       // 1. 添加用户消息
+       messages.value.push({
+         id: `user-${res.id}`, 
+         role: 'user',
+         content: quizPrompt.value
+       })
+       
+       // 2. 添加助手消息（题目卡片）
+       const quizInfo = parseQuizContent(res.assistant_message)
+       messages.value.push({
+          id: `assistant-${res.id}`,
+          realId: res.id,
+          role: 'assistant',
+          content: res.assistant_message,
+          isQuiz: true,
+          quizSummary: quizInfo.isQuiz ? quizInfo : null,
+          isCompleted: false,
+          userAnswers: null
+       })
+       
+       // 滚动到底部
+       scrollToBottom()
+       
        // 刷新出题历史
        if (activeTab.value === 'history') {
            fetchQuizHistoryList()
