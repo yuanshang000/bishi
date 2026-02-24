@@ -187,7 +187,7 @@
                           <div class="subsection-metrics">
                             <div class="metric">
                               <span class="label">平均得分:</span>
-                              <span class="value" :style="{ color: getScoreColor(sub.average_score) }">{{ sub.average_score }}</span>
+                              <span class="value" :style="{ color: getMetricScoreColor(sub.average_score, sub.passing_score) }">{{ sub.average_score }}</span>
                             </div>
                             <div class="metric">
                               <span class="label">及格分:</span>
@@ -198,8 +198,13 @@
                               <span class="value">{{ sub.weight }}</span>
                             </div>
                             <div class="metric">
-                              <span class="label">练习次数:</span>
-                              <span class="value">{{ sub.practice_count }}</span>
+                              <span class="label">练习题数:</span>
+                              <span class="value" :style="{ color: getPracticeCountColor(sub.total_questions, sub.min_questions) }">
+                                {{ sub.total_questions || 0 }}
+                                <span class="min-practice-label" v-if="sub.min_questions">
+                                  / {{ sub.min_questions }}
+                                </span>
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -207,12 +212,12 @@
                           <el-progress 
                             type="dashboard" 
                             :percentage="Math.min(100, (sub.average_score / 100) * 100)" 
-                            :color="getScoreColor(sub.average_score)"
+                            :color="getFinalStatusColor(sub)"
                             :width="isFullscreen ? 120 : 80"
                             :stroke-width="isFullscreen ? 10 : 6"
                           >
                             <template #default="{ percentage }">
-                              <span class="progress-score">{{ sub.average_score }}</span>
+                              <span class="progress-score" :style="{ color: getFinalStatusColor(sub) }">{{ sub.average_score }}</span>
                               <span class="progress-label">分</span>
                             </template>
                           </el-progress>
@@ -988,11 +993,40 @@ const getSeverityText = (severity: string): string => {
   }
 }
 
-// 获取分数颜色
+// 获取分数颜色 (Legacy, for charts/tables)
 const getScoreColor = (score: number): string => {
   if (score >= 80) return '#67C23A'
   if (score >= 60) return '#E6A23C'
   return '#F56C6C'
+}
+
+// 获取平均分指标颜色 (目标完成情况专用)
+// 平均分达到及格分 -> 绿，否则 -> 红
+const getMetricScoreColor = (score: number, passing: number = 60) => {
+  return score >= passing ? '#67C23A' : '#F56C6C'
+}
+
+// 获取练习次数指标颜色 (目标完成情况专用)
+// 练习次数达到最少次数 -> 绿，否则 -> 红
+const getPracticeCountColor = (count: number, min: number = 0) => {
+  if (!min) return '#606266' // 如果没有设置最少次数，默认颜色
+  return count >= min ? '#67C23A' : '#F56C6C'
+}
+
+// 获取最终状态颜色 (目标完成情况专用)
+// 两个都达标 -> 绿
+// 只有一个达标 -> 黄
+// 都不达标 -> 红
+const getFinalStatusColor = (sub: any) => {
+  const passingScore = sub.passing_score || 60
+  const minQuestions = sub.min_questions || 0
+  
+  const scoreOk = sub.average_score >= passingScore
+  const countOk = (sub.total_questions || 0) >= minQuestions
+  
+  if (scoreOk && countOk) return '#67C23A' // 目标已达标
+  if (!scoreOk && !countOk) return '#F56C6C' // 都不达标
+  return '#E6A23C' // 只有一个达标 (目标未达标)
 }
 </script>
 
