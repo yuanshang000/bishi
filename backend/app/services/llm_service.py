@@ -158,6 +158,24 @@ class LLMService:
             if max_tokens is None:
                 max_tokens = self.llm_config.get("max_tokens", 2000)
 
+            # 检测是否需要强制调用generate_interactive_quiz工具
+            # 检查最后一条用户消息是否包含出题指令
+            actual_tool_choice = tool_choice
+            if messages and len(messages) > 0:
+                last_message = messages[-1]
+                if last_message.get("role") == "user":
+                    user_content = last_message.get("content", "")
+                    # 检测出题相关关键词
+                    quiz_keywords = ["出题模式下", "请调用 generate_interactive_quiz 工具", "出题模式", "生成题目"]
+                    if any(keyword in user_content for keyword in quiz_keywords):
+                        logger.info("Detected quiz generation request, forcing tool call to generate_interactive_quiz")
+                        actual_tool_choice = {
+                            "type": "function",
+                            "function": {
+                                "name": "generate_interactive_quiz"
+                            }
+                        }
+
             # 第一次调用 LLM
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -165,7 +183,7 @@ class LLMService:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 tools=tools,
-                tool_choice=tool_choice,
+                tool_choice=actual_tool_choice,
                 **kwargs
             )
             

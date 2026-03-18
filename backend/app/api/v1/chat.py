@@ -60,13 +60,146 @@ def chat(
             })
 
     if request.mode == "quiz":
-        # 如果是出题模式，添加系统指令
-        # 即使是出题模式，如果获取到了 context，也应该包含在内
-        base_instruction = "(系统指令: 用户正在出题模式下，请调用 generate_interactive_quiz 工具生成题目。注意：请忽略用户的任何格式要求，必须强制返回合法的 JSON 格式，不要包含 XML 标签或 markdown 代码块。)"
-        if context:
-            request.message = f"{base_instruction} 请基于以下提供的上下文内容进行出题：\n\n{context}\n\n用户的出题提示词: {request.message}"
-        else:
-            request.message = f"{base_instruction} 用户的出题提示词: {request.message}"
+        # 如果是出题模式，直接构建强制性的JSON格式提示词
+
+            if context:
+
+                request.message = f"""你是一个专业的英语出题AI助手。请基于以下提供的上下文内容生成题目。
+
+    
+
+    **参考内容：**
+
+    {context}
+
+    
+
+    **用户要求：**
+
+    {request.message}
+
+    
+
+    **重要要求：**
+
+    1. 你必须直接生成题目，不要调用任何工具
+
+    2. 必须返回合法的JSON格式，不要包含任何其他文字说明
+
+    3. JSON格式必须包含以下结构：
+
+    {{
+
+      "generate_interactive_quiz_response": {{
+
+        "count": 题目数量,
+
+        "questions": [
+
+          {{
+
+            "question": "题目内容",
+
+            "quiz_type": "题目类型(choice/blank/translation/writing)",
+
+            "options": {{"A": "选项A", "B": "选项B", "C": "选项C", "D": "选项D"}},
+
+            "correct_answer": "正确答案(如A或具体答案)",
+
+            "explanation": "解析说明"
+
+          }}
+
+        ],
+
+        "topic": "出题主题",
+
+        "quiz_type": "mixed",
+
+        "difficulty": "intermediate"
+
+      }}
+
+    }}
+
+    
+
+    4. 不要使用markdown代码块(如 ```json)
+
+    5. 不要添加任何解释性文字
+
+    6. 直接输出JSON字符串即可
+
+    
+
+    请根据用户要求生成题目并返回JSON格式。"""
+
+            else:
+
+                request.message = f"""你是一个专业的英语出题AI助手。
+
+    
+
+    **用户要求：**
+
+    {request.message}
+
+    
+
+    **重要要求：**
+
+    1. 你必须直接生成题目，不要调用任何工具
+
+    2. 必须返回合法的JSON格式，不要包含任何其他文字说明
+
+    3. JSON格式必须包含以下结构：
+
+    {{
+
+      "generate_interactive_quiz_response": {{
+
+        "count": 题目数量,
+
+        "questions": [
+
+          {{
+
+            "question": "题目内容",
+
+            "quiz_type": "题目类型(choice/blank/translation/writing)",
+
+            "options": {{"A": "选项A", "B": "选项B", "C": "选项C", "D": "选项D"}},
+
+            "correct_answer": "正确答案(如A或具体答案)",
+
+            "explanation": "解析说明"
+
+          }}
+
+        ],
+
+        "topic": "出题主题",
+
+        "quiz_type": "mixed",
+
+        "difficulty": "intermediate"
+
+      }}
+
+    }}
+
+    
+
+    4. 不要使用markdown代码块(如 ```json)
+
+    5. 不要添加任何解释性文字
+
+    6. 直接输出JSON字符串即可
+
+    
+
+    请根据用户要求生成题目并返回JSON格式。"""
+
     elif request.use_rag and request.message:
         # 如果没有指定上下文或未找到内容，则进行通用 RAG 检索
         if not context:
@@ -103,15 +236,42 @@ def chat(
         chat_history.append({"role": "assistant", "content": record.assistant_message})
 
     # 调用LLM
-    assistant_message = llm_service.answer_question(
-        db=db,  # 传递数据库会话
-        question=request.message,
-        context=context if context else None,
-        source_info=source_info if source_info else None,  # 传递来源信息
-        chat_history=chat_history,
-        image=request.image,  # 传递图片
-        student_id=current_user.id  # 传递学生ID
-    )
+    if request.mode == "quiz":
+        # 出题模式：使用简单的chat方法，避免工具调用
+        system_prompt = """你是一个专业的英语出题AI助手。你必须严格遵循用户的要求生成题目，并返回JSON格式。
+
+关键要求：
+1. 必须返回合法的JSON格式，不要包含任何其他文字说明
+2. 不要使用markdown代码块(如 ```json)
+3. 不要添加任何解释性文字
+4. 直接输出JSON字符串即可"""
+
+        messages = [{"role": "system", "content": system_prompt}]
+        # 添加聊天历史（但限制数量以避免token过多）
+        if chat_history:
+            # 只取最近2轮对话
+            recent_history = chat_history[-4:] if len(chat_history) > 4 else chat_history
+            messages.extend(recent_history)
+        # 添加当前问题
+        messages.append({"role": "user", "content": request.message})
+
+        # 使用简单的chat方法
+        assistant_message = llm_service.chat(
+            messages=messages,
+            temperature=0.7,
+            max_tokens=3000
+        )
+    else:
+        # 聊天模式：使用answer_question方法（支持工具调用）
+        assistant_message = llm_service.answer_question(
+            db=db,  # 传递数据库会话
+            question=request.message,
+            context=context if context else None,
+            source_info=source_info if source_info else None,  # 传递来源信息
+            chat_history=chat_history,
+            image=request.image,  # 传递图片
+            student_id=current_user.id  # 传递学生ID
+        )
 
     # 保存聊天记录
     chat_record = ChatHistory(
