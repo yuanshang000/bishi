@@ -24,10 +24,13 @@ class WordTrainingService:
             timeout = getattr(settings, "LLM_TIMEOUT", 60.0)
             if timeout < 60:
                 timeout = 60.0
-                
+
+            # 统一使用环境变量配置
+            api_key = settings.DEEPSEEK_API_KEY if settings.LLM_PROVIDER == "deepseek" else settings.OPENAI_API_KEY
+
             self.client = AsyncOpenAI(
-                api_key=settings.DEEPSEEK_API_KEY if settings.LLM_PROVIDER == "deepseek" else settings.OPENAI_API_KEY,
-                base_url=settings.LLM_BASE_URL if settings.LLM_PROVIDER == "deepseek" else settings.LLM_BASE_URL,
+                api_key=api_key,
+                base_url=settings.LLM_BASE_URL,
                 timeout=timeout
             )
         return self.client
@@ -210,8 +213,8 @@ class WordTrainingService:
         system_instruction = (
             f"请务必以JSON格式返回结果，字段包括：'question' (题目文本), 'options' (选项数组，如果是填空题则为空), 'answer' (正确答案), 'quiz_type' (固定返回 '{quiz_type_hint}')。\n"
             "重要规则：\n"
-            "1. 题目(question)中【绝对不能】包含目标单词的中文释义或正确答案，否则无法起到测试作用。\n"
-            "2. 如果输入的目标单词包含中文释义（如'apple 苹果'），请只针对英文部分('apple')出题，并在题目中隐藏中文部分。\n"
+            "1. 对于默写/填空题，题目中【必须】包含目标单词的中文意思，例如：'单词默写，中文意思：\"抛弃\"\\n请默写英文单词：______'。\n"
+            "2. 题目中【绝对不能】包含正确答案（英文单词），否则无法起到测试作用。\n"
             "3. 如果是选择题，选项必须放在'options'数组中，【绝对不能】显示在'question'文本中。\n"
             "4. 不要包含markdown标记。"
         )
@@ -333,14 +336,17 @@ class WordTrainingService:
                 core = grammar_data["core"]
                 usages = grammar_data["usages"]
                 
-                # Generate 'count' questions
-                for _ in range(count):
-                    # Construct content: Core + Random Usage (if any)
+                # Generate 'count' questions using batch mode to avoid duplicates
+                if count > 1:
+                    # Batch generation: generate all questions at once to ensure diversity
+                    batch_task = self._generate_grammar_batch(core, usages, count, templates)
+                    tasks.append(batch_task)
+                else:
+                    # Single question: use original logic
                     content_to_use = core
                     if usages:
                         usage = random.choice(usages)
                         content_to_use = f"{core}\n{usage}"
-                    
                     tasks.append(bounded_generate(content_to_use, templates))
                 
         else:
@@ -407,6 +413,110 @@ class WordTrainingService:
             db.commit()
         
         return valid_results
+
+    async def _generate_grammar_batch(self, core: str, usages: List[str], count: int, templates: List[str]) -> Dict[str, Any]:
+        """
+        批量生成语法题目，避免重复
+        
+        Args:
+            core: 核心语法内容
+            usages: 用法列表
+            count: 需要生成的题目数量
+            templates: 提示词模板列表
+            
+        Returns:
+            Dict: 批量生成结果
+        """
+        client = self._get_client()
+        
+        # 构建批量生成的提示词
+        template = random.choice(templates)
+        
+        # 构建多样化的用法示例
+        usage_examples = ""
+        if usages:
+            usage_examples = "\n用法示例：\n" + "\n".join(f"- {usage}" for usage in usages[:5])
+        
+        # 构建批量生成提示词
+        batch_prompt = f"""{template}
+
+语法内容：
+{core}
+{usage_examples}
+
+**重要要求：**
+请一次性生成 {count} 道**互不相同**的语法选择题，确保：
+1. 每道题考察不同的句子场景
+2. 每道题使用不同的词汇和表达
+3. 每道题的干扰项设计要合理且不同
+4. 所有题目必须严格基于上述语法内容
+
+请以JSON数组格式返回 {count} 道题目，格式如下：
+[
+  {{
+    "question": "题目内容...",
+    "options": {{"A": "选项A", "B": "选项B", "C": "选项C", "D": "选项D"}},
+    "answer": "正确答案(A/B/C/D)",
+    "quiz_type": "choice"
+  }},
+  ...
+]
+
+不要包含markdown标记，直接返回JSON数组。"""
+        
+        try:
+            response = await client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[{"role": "user", "content": batch_prompt}],
+                temperature=0.8,  # 提高温度以增加多样性
+                max_tokens=4000
+            )
+            
+            content = response.choices[0].message.content.strip()
+            
+            # 清理markdown标记
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            # 解析JSON数组
+            import json
+            import re
+            
+            try:
+                questions = json.loads(content)
+            except json.JSONDecodeError:
+                # 尝试修复常见的JSON错误
+                content = re.sub(r',\s*}', '}', content)
+                content = re.sub(r',\s*]', ']', content)
+                questions = json.loads(content)
+            
+            # 确保返回的是数组
+            if not isinstance(questions, list):
+                questions = [questions]
+            
+            # 转换为单题格式，与原有接口兼容
+            # 这里我们只返回第一题的格式，其他题目通过扩展方式处理
+            if len(questions) > 0:
+                return {
+                    "word": "grammar_batch",
+                    "prompt": batch_prompt,
+                    "question_content": json.dumps(questions[0], ensure_ascii=False),
+                    "success": True,
+                    "template_type": "choice",
+                    "batch_questions": questions  # 额外保存批量题目
+                }
+            else:
+                raise ValueError("No questions generated")
+                
+        except Exception as e:
+            logger.error(f"Batch grammar generation error: {e}")
+            # 降级到逐个生成
+            raise
 
     def update_stats_after_submission(self, db: Session, user_id: int, word: str, is_correct: bool, subsection_id: int):
         """

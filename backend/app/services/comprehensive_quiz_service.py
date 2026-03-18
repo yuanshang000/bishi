@@ -24,10 +24,13 @@ class ComprehensiveQuizService:
             timeout = getattr(settings, "LLM_TIMEOUT", 60.0)
             if timeout < 60:
                 timeout = 60.0
-                
+
+            # 统一使用环境变量配置
+            api_key = settings.DEEPSEEK_API_KEY if settings.LLM_PROVIDER == "deepseek" else settings.OPENAI_API_KEY
+
             self.client = AsyncOpenAI(
-                api_key=settings.DEEPSEEK_API_KEY if settings.LLM_PROVIDER == "deepseek" else settings.OPENAI_API_KEY,
-                base_url=settings.LLM_BASE_URL if settings.LLM_PROVIDER == "deepseek" else settings.LLM_BASE_URL,
+                api_key=api_key,
+                base_url=settings.LLM_BASE_URL,
                 timeout=timeout
             )
         return self.client

@@ -421,11 +421,12 @@ const parseQuizContent = (content: string) => {
     
     // 1. Try parsing strictly as JSON first (fastest)
     try {
-        const parsed = JSON.parse(content)
-        const quizData = parsed.generate_interactive_quiz_response || parsed
-        if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
-             return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
-        }
+      const parsed = JSON.parse(content)
+      // 支持多种格式：generate_interactive_quiz_response, quiz, questions
+      const quizData = parsed.generate_interactive_quiz_response || parsed.quiz || { questions: parsed.questions }
+      if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
+           return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
+      }
     } catch(e) {}
 
     // 2. Cleanup markdown wrappers
@@ -439,11 +440,11 @@ const parseQuizContent = (content: string) => {
     
     // 3. Try parsing cleaned string
     try {
-        const parsed = JSON.parse(jsonStr)
-        const quizData = parsed.generate_interactive_quiz_response || parsed
-        if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
-             return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
-        }
+      const parsed = JSON.parse(jsonStr)
+      const quizData = parsed.generate_interactive_quiz_response || parsed.quiz || { questions: parsed.questions }
+      if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
+           return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
+      }
     } catch(e) {}
 
     // 4. Fallback: Find largest JSON-like block
@@ -452,11 +453,11 @@ const parseQuizContent = (content: string) => {
     if (firstOpen !== -1 && lastClose > firstOpen) {
         const candidate = jsonStr.substring(firstOpen, lastClose + 1)
         try {
-            const parsed = JSON.parse(candidate)
-            const quizData = parsed.generate_interactive_quiz_response || parsed
-            if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
-                return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
-            }
+          const parsed = JSON.parse(candidate)
+          const quizData = parsed.generate_interactive_quiz_response || parsed.quiz || { questions: parsed.questions }
+          if (quizData && Array.isArray(quizData.questions) && quizData.questions.length > 0) {
+            return { isQuiz: true, count: quizData.questions.length, topic: quizData.topic || '智能生成练习', data: quizData }
+          }
         } catch(e) {}
     }
 

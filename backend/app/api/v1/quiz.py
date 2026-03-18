@@ -34,6 +34,87 @@ import json
 
 router = APIRouter(prefix="/quiz", tags=["练习"])
 
+# 辅助函数
+def _process_single_question(content_json: dict, item: dict) -> dict:
+    """处理单个题目内容"""
+    import re
+    
+    # Normalize keys
+    q_text = content_json.get("question") or content_json.get("question_text")
+    raw_options = content_json.get("options")
+    answer = content_json.get("answer") or content_json.get("correct_answer")
+    
+    # Process options to ensure Dict format {"A": "val", "B": "val"} and clean content
+    final_options = None
+    
+    if isinstance(raw_options, list) and raw_options:
+        final_options = {}
+        for idx, opt in enumerate(raw_options):
+            key = chr(65 + idx) # 0->A, 1->B
+            # Remove prefixes like "A.", "A ", "A、"
+            clean_opt = re.sub(r'^[A-D][\.\s\、]+', '', str(opt)).strip()
+            final_options[key] = clean_opt
+    elif isinstance(raw_options, dict) and raw_options:
+        final_options = {}
+        for k, v in raw_options.items():
+            # Clean values as well just in case
+            clean_opt = re.sub(r'^[A-D][\.\s\、]+', '', str(v)).strip()
+            final_options[k] = clean_opt
+    
+    # Normalize answer: If it's text and matches one of the options, convert to Key (A/B/C/D)
+    # Only for choice questions
+    final_answer = answer
+    if final_options and isinstance(answer, str):
+        # Check if answer is already a key
+        if answer in final_options:
+            final_answer = answer
+        else:
+            # Check if answer matches any option value
+            for k, v in final_options.items():
+                if v.strip() == answer.strip():
+                    final_answer = k
+                    break
+    
+    # Determine quiz_type: Priority order: 
+    # 1. AI returned 'quiz_type' field (from system instruction)
+    # 2. Template type hint from service (detected from prompt text)
+    # 3. Fallback: 'choice' if options exist, else 'blank'
+    ai_quiz_type = content_json.get("quiz_type")
+    template_type = item.get("template_type")
+    
+    final_quiz_type = "blank"
+    if ai_quiz_type and ai_quiz_type in ["choice", "blank"]:
+        final_quiz_type = ai_quiz_type
+    elif template_type:
+        final_quiz_type = template_type
+    else:
+        final_quiz_type = "choice" if final_options else "blank"
+
+    return {
+        "question_text": q_text,
+        "quiz_type": final_quiz_type,
+        "options": final_options if final_options else [],
+        "correct_answer": final_answer,
+        "explanation": "",
+        "meta": {
+            "word": item.get("word", "unknown"),
+            "prompt": item.get("prompt", "")
+        }
+    }
+
+def _create_fallback_question(item: dict) -> dict:
+    """创建降级题目（当解析失败时）"""
+    return {
+        "question_text": "题目解析失败，请稍后重试",
+        "quiz_type": "blank",
+        "options": [],
+        "correct_answer": "",
+        "explanation": "题目生成失败，请重试",
+        "meta": {
+            "word": item.get("word", "unknown"),
+            "prompt": item.get("prompt", "")
+        }
+    }
 
 @router.post("/comprehensive/generate", response_model=QuizResponse, status_code=status.HTTP_201_CREATED)
 async def generate_comprehensive_quiz(
@@ -105,74 +186,20 @@ async def generate_word_training(
     
     for item in generated_items:
         try:
-            content_json = json.loads(item["question_content"])
-            # Normalize keys
-            q_text = content_json.get("question") or content_json.get("question_text")
-            raw_options = content_json.get("options")
-            answer = content_json.get("answer") or content_json.get("correct_answer")
-            
-            # Process options to ensure Dict format {"A": "val", "B": "val"} and clean content
-            import re
-            final_options = None
-            
-            if isinstance(raw_options, list) and raw_options:
-                final_options = {}
-                for idx, opt in enumerate(raw_options):
-                    key = chr(65 + idx) # 0->A, 1->B
-                    # Remove prefixes like "A.", "A ", "A、"
-                    clean_opt = re.sub(r'^[A-D][\.\s\、]+', '', str(opt)).strip()
-                    final_options[key] = clean_opt
-            elif isinstance(raw_options, dict) and raw_options:
-                final_options = {}
-                for k, v in raw_options.items():
-                    # Clean values as well just in case
-                    clean_opt = re.sub(r'^[A-D][\.\s\、]+', '', str(v)).strip()
-                    final_options[k] = clean_opt
-            
-            # Normalize answer: If it's text and matches one of the options, convert to Key (A/B/C/D)
-            # Only for choice questions
-            final_answer = answer
-            if final_options and isinstance(answer, str):
-                # Check if answer is already a key
-                if answer in final_options:
-                    final_answer = answer
-                else:
-                    # Check if answer matches any option value
-                    for k, v in final_options.items():
-                        if v.strip() == answer.strip():
-                            final_answer = k
-                            break
-            
-            # Determine quiz_type: Priority order: 
-            # 1. AI returned 'quiz_type' field (from system instruction)
-            # 2. Template type hint from service (detected from prompt text)
-            # 3. Fallback: 'choice' if options exist, else 'blank'
-            ai_quiz_type = content_json.get("quiz_type")
-            template_type = item.get("template_type")
-            
-            final_quiz_type = "blank"
-            if ai_quiz_type and ai_quiz_type in ["choice", "blank"]:
-                final_quiz_type = ai_quiz_type
-            elif template_type:
-                final_quiz_type = template_type
+            # Check if this is a batch generation result
+            if "batch_questions" in item and item.get("word") == "grammar_batch":
+                # Process batch questions
+                batch_questions = item["batch_questions"]
+                for q_content in batch_questions:
+                    questions_data.append(_process_single_question(q_content, item))
             else:
-                final_quiz_type = "choice" if final_options else "blank"
-
-            q_struct = {
-                "question_text": q_text,
-                "quiz_type": final_quiz_type,
-                "options": final_options if final_options else [],
-                "correct_answer": final_answer,
-                "explanation": "",
-                "meta": {
-                    "word": item["word"],
-                    "prompt": item["prompt"]
-                }
-            }
-            questions_data.append(q_struct)
+                # Process single question
+                content_json = json.loads(item["question_content"])
+                questions_data.append(_process_single_question(content_json, item))
         except Exception as e:
             print(f"Error parsing quiz item: {e}")
             # Fallback if JSON parsing fails
+            questions_data.append(_create_fallback_question(item))
             questions_data.append({
                 "question_text": item["question_content"],
                 "quiz_type": "blank", # Default to blank so user can at least try to answer

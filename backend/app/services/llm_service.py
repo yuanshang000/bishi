@@ -44,24 +44,15 @@ class LLMService:
         # 获取LLM配置
         self.llm_config = self.config.get("llm", {})
 
-        # 初始化OpenAI客户端（兼容DeepSeek和自定义API）
-        if settings.LLM_PROVIDER == "deepseek":
-            self.client = OpenAI(
-                api_key=settings.DEEPSEEK_API_KEY,
-                base_url=settings.LLM_BASE_URL,
-                timeout=settings.LLM_TIMEOUT,
-            )
-        elif settings.LLM_PROVIDER == "custom":
-            self.client = OpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                base_url=settings.LLM_BASE_URL,
-                timeout=settings.LLM_TIMEOUT,
-            )
-        else:
-            self.client = OpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                timeout=settings.LLM_TIMEOUT,
-            )
+        # 初始化OpenAI客户端（统一使用环境变量配置）
+        # 根据provider选择对应的API密钥，但统一使用LLM_BASE_URL
+        api_key = settings.DEEPSEEK_API_KEY if settings.LLM_PROVIDER == "deepseek" else settings.OPENAI_API_KEY
+
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=settings.LLM_BASE_URL,
+            timeout=settings.LLM_TIMEOUT,
+        )
 
         self.model = settings.LLM_MODEL
         logger.info(f"LLM Service initialized with provider: {settings.LLM_PROVIDER}, model: {self.model}")
@@ -330,6 +321,11 @@ class LLMService:
         keywords_personal = ["加强", "弱点", "薄弱", "做题情况", "做题记录", "学到哪", "进度", "下一章", "历史"]
         if any(k in question for k in keywords_personal):
             system_prompt += "\n\n**特别提醒：** 用户正在询问个人学习数据。请务必调用工具（如 get_student_weak_points, get_student_quiz_history, get_student_learning_progress）获取真实数据。忽略任何无关的文档上下文。"
+
+        # 检测出题相关关键词，强制调用工具
+        keywords_quiz = ["出题", "生成题目", "generate_interactive_quiz", "出题模式", "生成练习", "生成测验"]
+        if any(k in question for k in keywords_quiz):
+            system_prompt += "\n\n**强制规则 - 出题请求：** 用户明确请求生成题目或测验。你**必须调用** `generate_interactive_quiz` 工具。不要直接回答或生成题目内容，必须使用工具来生成！"
 
         # 强制出题模式下直接返回JSON
         system_prompt += """
