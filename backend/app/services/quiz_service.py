@@ -23,7 +23,6 @@ from app.models.document import CourseDocument
 from app.services.llm_service import llm_service
 from app.core.config import settings
 from app.services.rag_service import rag_service
-from app.services.tts_service import tts_service
 
 logger = logging.getLogger(__name__)
 
@@ -337,45 +336,6 @@ class QuizService:
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="题目生成失败"
                 )
-
-            # 如果是听力题，将audio_text转换为音频
-            if quiz_type.startswith("listening"):
-                logger.info(f"Converting {len(questions)} listening questions to audio (quiz_type: {quiz_type})...")
-                for i, question in enumerate(questions):
-                    # 详细日志：检查题目结构
-                    logger.info(f"Listening question {i+1} keys: {list(question.keys())}")
-
-                    if 'audio_text' in question:
-                        audio_text = question['audio_text']
-                        logger.info(f"Listening question {i+1}: audio_text length = {len(audio_text)} chars")
-                        logger.debug(f"Listening question {i+1}: audio_text = {audio_text[:200]}...")
-
-                        try:
-                            # 将audio_text转换为音频
-                            logger.info(f"Calling TTS service for question {i+1}...")
-                            audio_url = await tts_service.text_to_speech(audio_text)
-
-                            # 在题目中添加audio_url
-                            question['audio_url'] = audio_url
-
-                            # 将audio_text移到explanation中，标注为"音频文本"
-                            original_explanation = question.get('explanation', '')
-                            audio_text_note = f"\n\n**音频文本：**\n{audio_text}"
-                            question['explanation'] = original_explanation + audio_text_note
-
-                            # 从题目中删除audio_text字段（前端不再需要显示）
-                            # 注意：这里不删除，因为后端可能还需要用到，只是在返回给前端时不显示
-                            # del question['audio_text']
-
-                            logger.info(f"Question {i+1}: Audio generated successfully - {audio_url}")
-                        except Exception as e:
-                            logger.error(f"Error generating audio for question {i+1}: {e}", exc_info=True)
-                            # 如果音频生成失败，保留原有的audio_text
-                            question['audio_url'] = None
-                    else:
-                        logger.warning(f"Listening question {i+1}: Missing 'audio_text' field! Question keys: {list(question.keys())}")
-                        question['audio_url'] = None
-                logger.info(f"Audio conversion completed for {len(questions)} listening questions")
 
             # 创建练习记录
             quiz_record = QuizRecord(

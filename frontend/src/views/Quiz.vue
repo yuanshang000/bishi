@@ -74,25 +74,27 @@
 
       <el-form :inline="true" class="quiz-form" size="large" style="margin-top: 30px;">
         <!-- 章节选择（章节练习 或 综合训练） -->
-        <el-form-item label="选择章节/小节" v-if="quizForm.practice_mode === 'chapter' || quizForm.practice_mode === 'random'">
+        <el-form-item v-if="quizForm.practice_mode === 'chapter' || quizForm.practice_mode === 'random'">
+          <template #label>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              {{ quizForm.practice_mode === 'random' ? '选择章节/节' : '选择章节/小节' }}
+              <el-tooltip v-if="(quizForm.practice_mode === 'chapter' && !quizForm.subsection_id) || (quizForm.practice_mode === 'random' && !quizForm.section_id)" 
+                       :content="quizForm.practice_mode === 'chapter' ? '请选择到具体小节后才可出题' : '请选择到具体节(Section)才可出题'" 
+                       placement="top">
+                <el-icon style="color: #909399; font-size: 16px; cursor: pointer;"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </template>
           <el-cascader
             v-model="selectedCascaderValue"
             :options="cascaderOptions"
             :placeholder="quizForm.practice_mode === 'random' ? '请选择章节/节' : '请选择章节/小节'"
-            :style="{ width: quizForm.practice_mode === 'random' ? '400px' : '850px', fontSize: '18px' }"
+            :style="{ width: quizForm.practice_mode === 'random' ? '400px' : '570px', fontSize: '18px' }"
             :props="{ checkStrictly: quizForm.practice_mode === 'random' }" 
             @change="handleCascaderChange"
             clearable
           />
-          <div v-if="quizForm.practice_mode === 'chapter' && !quizForm.subsection_id" style="color: #909399; font-size: 16px; margin-top: 8px; display: flex; align-items: center;">
-            <el-icon style="margin-right: 4px;"><InfoFilled /></el-icon>
-            请选择到具体小节后才可出题
-          </div>
-          <div v-if="quizForm.practice_mode === 'random' && !quizForm.section_id" style="color: #909399; font-size: 16px; margin-top: 8px; display: flex; align-items: center;">
-            <el-icon style="margin-right: 4px;"><InfoFilled /></el-icon>
-            请选择到具体节(Section)才可出题
-          </div>
-        </el-form-item>
+          </el-form-item>
 
         <!-- 单词训练模式开关 (已移除，默认启用) -->
         <!-- <el-form-item label="训练模式" v-if="quizForm.practice_mode === 'chapter' && quizForm.subsection_id"> ... </el-form-item> -->
@@ -130,7 +132,15 @@
         </el-form-item>
 
         <!-- 难度选择（综合训练） -->
-        <el-form-item label="难度" v-if="quizForm.practice_mode === 'random'">
+        <el-form-item v-if="quizForm.practice_mode === 'random'">
+          <template #label>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              难度
+              <el-tooltip raw-content content="初级-高中<br>中级-CET4<br>高级-CET6" placement="top">
+                <el-icon style="color: #909399; font-size: 16px; cursor: pointer;"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </template>
            <el-select v-model="quizForm.difficulty" placeholder="请选择难度" style="width: 150px;">
               <el-option label="初级" value="初级" />
               <el-option label="中级" value="中级" />
@@ -152,21 +162,34 @@
           </el-alert>
         </el-form-item>
 
-        <el-form-item label="题数">
+        <el-form-item>
+          <template #label>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              题数
+              <el-tooltip :content="getQuestionCountTooltip()" placement="top">
+                <el-icon style="color: #909399; font-size: 16px; cursor: pointer;"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </template>
           <el-input-number v-model="quizForm.question_count" :min="1" :max="50" />
         </el-form-item>
 
         <el-form-item>
-          <el-button type="primary" @click="handleCreateQuiz" :loading="creating">
-            开始练习
-          </el-button>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <el-button type="primary" @click="handleCreateQuiz" :loading="creating">
+              开始练习
+            </el-button>
+            <el-tooltip :content="getQuizStartTooltip()" placement="right">
+              <el-icon style="color: #909399; font-size: 16px; cursor: pointer;"><InfoFilled /></el-icon>
+            </el-tooltip>
+          </div>
         </el-form-item>
       </el-form>
 
       <el-divider />
-      
-      <el-row :gutter="20">
-        <el-col :span="14">
+
+      <el-row :gutter="12">
+        <el-col :span="13">
           <h3 class="section-title">练习历史</h3>
           <el-table :data="quizHistory" style="width: 100%; font-size: 16px;" :row-style="{ height: '55px' }">
             <el-table-column prop="practice_mode" label="练习方式" width="120">
@@ -276,7 +299,7 @@
             </el-table-column>
           </el-table>
         </el-col>
-        <el-col :span="10">
+        <el-col :span="11">
            <el-card shadow="hover" v-if="subsectionStats" class="stats-card">
               <template #header>
                 <div class="stats-header">
@@ -711,54 +734,6 @@
           </el-tag>
           {{ q.question_text || q.question }}
         </h4>
-
-        <!-- 通用音频播放器 (支持听写题等非Listening类型但有音频的题目) -->
-        <div v-if="q.audio_url" class="audio-player-box">
-          <h5>🎧 听力音频：</h5>
-          <audio controls :src="getAudioUrl(q.audio_url)" class="audio-player">
-            您的浏览器不支持音频播放。
-          </audio>
-        </div>
-
-        <!-- 听力理解题 -->
-        <div v-if="getQuestionType(q, currentQuiz.quiz_type) === 'listening'" class="listening-question">
-          <!-- 听力选项 -->
-          <div class="listening-options">
-            <!-- 多选模式 (Options is Array) -->
-            <div v-if="Array.isArray(q.options)">
-                <p class="instruction-text">请勾选出你听到的单词（多选）：</p>
-                <el-checkbox-group v-model="userAnswers[index]">
-                  <el-checkbox 
-                    v-for="(optText, i) in q.options" 
-                    :key="i" 
-                    :label="optText" 
-                    border
-                    style="margin-bottom: 10px; margin-right: 10px;"
-                  >
-                    {{ optText }}
-                  </el-checkbox>
-                </el-checkbox-group>
-            </div>
-            
-            <!-- 单选模式 (Options is Object/Dict) -->
-            <div v-else>
-                <p class="instruction-text">请选择正确的单词（单选）：</p>
-                <el-radio-group v-model="userAnswers[index]" class="answer-group horizontal-options">
-                    <el-radio
-                      v-for="(optText, optKey) in q.options"
-                      :key="optKey"
-                      :label="optKey"
-                      class="answer-option horizontal-option"
-                      border
-                      style="margin-bottom: 10px; margin-right: 10px;"
-                    >
-                      <span class="option-key">{{ getOptionLabel(optKey) }}.</span>
-                      <span class="option-text">{{ optText }}</span>
-                    </el-radio>
-                </el-radio-group>
-            </div>
-          </div>
-        </div>
 
         <!-- 阅读理解题 -->
         <div v-if="getQuestionType(q, currentQuiz.quiz_type) === 'reading'" class="reading-question">
@@ -2355,6 +2330,24 @@ const fetchHistory = async () => {
   }
 }
 
+const getQuizStartTooltip = () => {
+  if (quizForm.practice_mode === 'chapter') {
+    return '根据选择小节内容进行出题'
+  } else if (quizForm.practice_mode === 'random') {
+    return '根据选择节内容进行出题'
+  } else if (quizForm.practice_mode === 'comprehensive') {
+    return '根据AI学情分析的薄弱点自动分配题型'
+  }
+  return ''
+}
+
+const getQuestionCountTooltip = () => {
+  if (quizForm.practice_mode === 'comprehensive') {
+    return '只有随机选中的薄弱点小节里面的薄弱点>=题数时才会出对应的题数，否则则是根据随机选中的薄弱点小节里面的薄弱点进行出题，一个薄弱点一道题'
+  }
+  return '用户不要一次生成太多的题目，可能会导致无法生成题目，建议是最多5道题'
+}
+
 const handleCreateQuiz = async () => {
   if (quizForm.practice_mode === 'chapter' && !quizForm.subsection_id) {
     ElMessage.warning('请选择具体小节后再出题')
@@ -3159,7 +3152,7 @@ const getQuestionTypes = (quizRecord: any) => {
 
 <style scoped>
 .quiz-container {
-  padding: 20px;
+  padding: 0;
   position: relative;
 }
 
@@ -3169,10 +3162,11 @@ const getQuestionTypes = (quizRecord: any) => {
   justify-content: space-between;
   align-items: center;
   position: relative;
+  margin-bottom: 8px;
 }
 
 .quiz-title {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: bold;
   min-width: 100px;
 }
@@ -3184,14 +3178,14 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .large-radio {
-  margin: 0 15px !important;
+  margin: 0 12px !important;
 }
 
 .large-radio :deep(.el-radio-button__inner) {
   border: 1px solid #dcdfe6 !important;
   border-radius: 4px !important;
   box-shadow: none !important;
-  padding: 12px 25px;
+  padding: 12px 24px;
   font-size: 16px;
 }
 
@@ -3206,7 +3200,7 @@ const getQuestionTypes = (quizRecord: any) => {
 .section-title {
   font-size: 20px;
   font-weight: bold;
-  margin-bottom: 20px;
+  margin-bottom: 15px;
   color: #303133;
 }
 
@@ -3216,7 +3210,10 @@ const getQuestionTypes = (quizRecord: any) => {
   border: none;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
   transition: all 0.3s ease;
-  height: 100%; /* Fill column height */
+  margin-bottom: 0;
+  height: 100%; /* 让卡片占满列的高度 */
+  display: flex;
+  flex-direction: column;
 }
 
 .stats-card:hover {
@@ -3244,14 +3241,13 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .header-icon {
-  margin-right: 8px;
-  color: #409EFF;
-  font-size: 18px;
+  font-size: 20px;
+  margin-right: 6px;
 }
 
 .stats-title-text {
-  font-size: 20px;
-  font-weight: bold;
+  font-size: 19px;
+  font-weight: 600;
   color: #303133;
 }
 
@@ -3262,7 +3258,11 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .stats-content {
-  padding: 10px 5px;
+  padding: 15px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Overview Section */
@@ -3271,28 +3271,30 @@ const getQuestionTypes = (quizRecord: any) => {
   justify-content: space-around;
   align-items: center;
   margin-bottom: 20px;
+  flex-shrink: 0;
 }
 
 .overview-item {
   text-align: center;
+  padding: 0 12px;
 }
 
 .overview-value {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: bold;
   color: #303133;
   line-height: 1.2;
 }
 
 .overview-label {
-  font-size: 12px;
+  font-size: 14px;
   color: #909399;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .overview-divider {
   width: 1px;
-  height: 30px;
+  height: 35px;
   background-color: #E4E7ED;
 }
 
@@ -3302,7 +3304,8 @@ const getQuestionTypes = (quizRecord: any) => {
   width: 100%;
   display: flex;
   justify-content: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
 .gauge-chart {
@@ -3314,9 +3317,10 @@ const getQuestionTypes = (quizRecord: any) => {
 .final-score-card {
   background: linear-gradient(135deg, #f5f7fa 0%, #eef1f6 100%);
   border-radius: 12px;
-  padding: 20px 10px;
+  padding: 20px 15px;
   border: 1px solid #e4e7ed;
   margin-top: 15px;
+  flex-shrink: 0;
 }
 
 .score-row {
@@ -3331,9 +3335,9 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .score-label {
-  font-size: 14px;
+  font-size: 15px;
   color: #606266;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3341,16 +3345,16 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .weight-tag {
-  font-size: 12px;
+  font-size: 13px;
   color: #909399;
   background-color: #fff;
-  padding: 2px 6px;
+  padding: 4px 10px;
   border-radius: 10px;
   border: 1px solid #dcdfe6;
 }
 
 .score-value {
-  font-size: 32px;
+  font-size: 36px;
   font-weight: bold;
   color: #303133;
   line-height: 1;
@@ -3362,20 +3366,20 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .score-value.pass-val {
-  font-size: 36px;
+  font-size: 40px;
   color: #E6A23C;
 }
 
 .score-sub {
-  font-size: 14px;
+  font-size: 15px;
   color: #909399;
   font-weight: normal;
-  margin-left: 2px;
+  margin-left: 4px;
 }
 
 .score-divider-vertical {
   width: 1px;
-  height: 40px;
+  height: 45px;
   background-color: #DCDFE6;
 }
 
@@ -3397,11 +3401,11 @@ const getQuestionTypes = (quizRecord: any) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 60px;
+  padding: 35px 60px;
 }
 
 .loading-icon {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
   animation: rotate 2s linear infinite;
 }
 
@@ -3422,7 +3426,7 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .loading-content p {
-  margin: 0 0 20px 0;
+  margin: 0 0 18px 0;
   color: #909399;
   font-size: 14px;
 }
@@ -3432,16 +3436,16 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .quiz-form {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .quiz-card {
-  margin-top: 20px;
+  margin-top: 18px;
 }
 
 .question-item {
-  margin-bottom: 40px;
-  padding: 20px;
+  margin-bottom: 35px;
+  padding: 18px;
   background: #f9f9f9;
   border-radius: 8px;
 }
@@ -3803,7 +3807,7 @@ const getQuestionTypes = (quizRecord: any) => {
 .min-req {
   font-size: 14px;
   color: #909399;
-  margin-left: 2px;
+  margin-left: 4px;
   font-weight: normal;
 }
 
@@ -3892,6 +3896,7 @@ const getQuestionTypes = (quizRecord: any) => {
   margin: 0 0 10px 0;
   color: #409EFF;
   font-weight: bold;
+  font-size: 15px;
 }
 
 /* 音频播放器样式 */
@@ -3940,6 +3945,7 @@ const getQuestionTypes = (quizRecord: any) => {
   margin: 0 0 8px 0;
   color: #E6A23C;
   font-weight: bold;
+  font-size: 14px;
 }
 
 .key-points-box ul {
@@ -3950,7 +3956,7 @@ const getQuestionTypes = (quizRecord: any) => {
 .key-points-box li {
   color: #606266;
   line-height: 1.6;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .writing-requirements {
@@ -3965,6 +3971,7 @@ const getQuestionTypes = (quizRecord: any) => {
   margin: 0 0 10px 0;
   color: #409EFF;
   font-weight: bold;
+  font-size: 14px;
 }
 
 .writing-requirements ul {
@@ -3975,7 +3982,7 @@ const getQuestionTypes = (quizRecord: any) => {
 .writing-requirements li {
   color: #606266;
   line-height: 1.6;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .writing-requirements p {
@@ -4027,7 +4034,7 @@ const getQuestionTypes = (quizRecord: any) => {
   font-family: inherit;
   white-space: pre-wrap;
   word-wrap: break-word;
-  line-height: 2;
+  line-height: 1.9;
   color: #262626;
   background: none;
   border: none;
@@ -4037,9 +4044,10 @@ const getQuestionTypes = (quizRecord: any) => {
 /* Chapter Overview New Styles */
 .chapter-total-score {
   text-align: center;
-  padding: 20px 0;
+  padding: 22px 0;
   border-bottom: 1px solid #ebeef5;
-  margin-bottom: 15px;
+  margin-bottom: 18px;
+  flex-shrink: 0;
 }
 
 .chapter-total-score.passed .score-num {
@@ -4054,7 +4062,7 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .score-num {
-  font-size: 48px;
+  font-size: 52px;
   font-weight: bold;
   color: #303133;
   line-height: 1;
@@ -4067,8 +4075,8 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .score-target {
-  margin-top: 10px;
-  font-size: 14px;
+  margin-top: 12px;
+  font-size: 15px;
   color: #606266;
   display: flex;
   align-items: center;
@@ -4083,8 +4091,8 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .sub-stat-item {
-  margin-bottom: 15px;
-  padding: 10px;
+  margin-bottom: 18px;
+  padding: 12px;
   background-color: #f8f9fa;
   border-radius: 6px;
 }
@@ -4093,11 +4101,11 @@ const getQuestionTypes = (quizRecord: any) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .sub-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: #303133;
   overflow: hidden;
@@ -4109,33 +4117,36 @@ const getQuestionTypes = (quizRecord: any) => {
 .sub-stat-body {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 13px;
+  margin-bottom: 10px;
+  font-size: 15px;
 }
 
 .stat-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
 }
 
 .stat-row .label {
   color: #909399;
+  font-size: 14px;
 }
 
 .stat-row .value {
   font-weight: 500;
+  font-size: 15px;
 }
 
 .stat-row .score-val {
   font-weight: bold;
   color: #409EFF;
+  font-size: 16px;
 }
 
 .status-tip {
   color: #F56C6C;
-  font-size: 12px;
-  margin-left: 2px;
+  font-size: 14px;
+  margin-left: 4px;
 }
 
 /* 反馈中的特殊标记样式 */
@@ -4169,7 +4180,7 @@ const getQuestionTypes = (quizRecord: any) => {
 
 .doc-item {
   margin: 5px 0;
-  padding: 5px 8px;
+  padding: 6px 10px;
   background: white;
   border-radius: 4px;
   display: flex;
@@ -4179,6 +4190,7 @@ const getQuestionTypes = (quizRecord: any) => {
 /* Weak Points Overview Styles */
 .weak-points-overview .stats-content {
   padding: 0;
+  min-height: 250px;
 }
 
 .weak-points-list {
@@ -4195,7 +4207,7 @@ const getQuestionTypes = (quizRecord: any) => {
 
 .wp-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
   color: #303133;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4213,7 +4225,7 @@ const getQuestionTypes = (quizRecord: any) => {
   display: flex;
   justify-content: space-between;
   margin-bottom: 10px;
-  font-size: 13px;
+  font-size: 14px;
   color: #606266;
   border-bottom: 1px solid #ebeef5;
   padding-bottom: 8px;
@@ -4240,19 +4252,19 @@ const getQuestionTypes = (quizRecord: any) => {
 }
 
 .detail-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: #303133;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 75%;
+  max-width: 70%;
 }
 
 .detail-metrics {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 13px;
   color: #909399;
 }
 
@@ -4264,7 +4276,7 @@ const getQuestionTypes = (quizRecord: any) => {
 
 /* Custom layout for Practice Center */
 .quiz-container {
-  height: calc(100vh - 84px); /* Adjust for header height */
+  height: calc(100vh - 60px); /* 占满从header下方到浏览器底部的所有空间 */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -4276,6 +4288,7 @@ const getQuestionTypes = (quizRecord: any) => {
   flex-direction: column;
   overflow: hidden;
   margin-bottom: 0 !important;
+  height: 100%;
 }
 
 .practice-center-card :deep(.el-card__body) {
@@ -4283,43 +4296,103 @@ const getQuestionTypes = (quizRecord: any) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-bottom: 0;
+  padding: 20px;
+  padding-bottom: 15px;
 }
 
-/* Ensure the row takes remaining height */
+.practice-center-card :deep(.el-card__header) {
+  padding: 16px 20px;
+}
+
+/* 标题和标签页区域优化 */
+.practice-center-card .quiz-header {
+  flex-shrink: 0;
+  margin-bottom: 12px;
+}
+
+/* 表单区域优化 */
+.practice-center-card .quiz-form {
+  flex-shrink: 0;
+  margin-top: 8px !important;
+}
+
+.practice-center-card .el-form-item {
+  margin-bottom: 12px;
+}
+
+/* 分割线优化 */
+.practice-center-card .el-divider {
+  flex-shrink: 0;
+  margin: 15px 0 10px 0;
+}
+
+/* 确保row占据剩余高度 */
 .practice-center-card .el-row {
   flex: 1;
   overflow: hidden;
   margin-bottom: 0 !important;
-  height: 100%;
+  height: 0; /* 允许flex控制高度 */
 }
 
-/* Ensure columns are full height and handle scrolling */
+/* 确保列是全高度并处理滚动 */
 .practice-center-card .el-col {
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-/* Left column: Practice History */
+/* 左列：练习历史 */
 .practice-center-card .el-col:first-child {
-  padding-right: 10px; /* Add some spacing if gutter isn't enough */
+  padding-right: 8px;
 }
 
-/* Right column: Stats/Overview */
-.practice-center-card .el-col:last-child {
-  overflow-y: auto;
-  padding-right: 5px; /* Add padding for scrollbar */
+/* 练习历史标题 */
+.practice-center-card .section-title {
+  flex-shrink: 0;
+  margin: 0 0 10px 0;
+  font-size: 18px;
+  font-weight: 600;
 }
 
-/* Make table scrollable */
+/* 表格区域 */
 .practice-center-card .el-table {
   flex: 1;
-  height: 0 !important; /* Allow flex to control height */
+  overflow-y: auto;
+  height: 0 !important; /* 允许flex控制高度 */
+  font-size: 15px;
 }
 
-/* Ensure stats cards fit or scroll */
+.practice-center-card .el-table :deep(.el-table__row) {
+  height: 55px;
+}
+
+.practice-center-card .el-table :deep(.el-table__cell) {
+  padding: 10px 0;
+}
+
+/* 右列：统计/总览 */
+.practice-center-card .el-col:last-child {
+  overflow-y: auto;
+  padding-right: 0;
+  padding-left: 8px;
+}
+
+/* 确保统计卡片适应或滚动 */
 .practice-center-card .stats-card {
-  margin-bottom: 20px;
+  margin-bottom: 0;
+}
+
+/* 优化小节列表滚动 */
+.subsection-stats-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 10px;
+  margin-bottom: 12px;
+}
+
+/* 优化薄弱点列表滚动 */
+.weak-points-list {
+  max-height: 350px;
+  overflow-y: auto;
 }
 </style>

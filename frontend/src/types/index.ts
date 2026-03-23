@@ -123,7 +123,7 @@ export interface QuizCreateForm {
   practice_mode: 'chapter' | 'subsection' | 'random' | 'comprehensive'  // 添加练习方式
   chapter_id?: number  // 改为可选
   subsection_id?: number
-  quiz_type: 'choice' | 'blank' | 'translation' | 'matching' | 'ordering' | 'short_answer' | 'listening' | 'writing' | 'reading'
+  quiz_type: 'choice' | 'blank' | 'translation' | 'matching' | 'ordering' | 'short_answer' | 'writing' | 'reading'
   question_count: number
   difficulty: 'easy' | 'intermediate' | 'hard'
   knowledge_point_ids?: string[]

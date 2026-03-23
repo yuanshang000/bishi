@@ -194,6 +194,7 @@
                 </div>
 
                 <el-input
+                  ref="quizInputRef"
                   v-model="quizPrompt"
                   placeholder="请输入出题提示词（支持输入 # 选择章节、节或小节，AI将基于所选内容出题）"
                   :rows="6"
@@ -269,17 +270,18 @@
               </el-upload>
 
               <el-input
+                ref="chatInputRef"
                 v-model="inputMessage"
                 placeholder="请输入您的问题...（支持 Ctrl+V 粘贴图片，输入 # 选择章节）"
                 :rows="3"
                 type="textarea"
-                @keyup.ctrl.enter="handleSend"
+                @keyup.enter.exact="handleSend"
                 @paste="handlePaste"
                 class="message-input"
               />
 
               <el-button type="primary" @click="handleSend" :loading="loading" :disabled="!inputMessage.trim()">
-                发送 (Ctrl+Enter)
+                发送 (Enter)
               </el-button>
             </div>
           </div>
@@ -377,6 +379,9 @@ const userAnswers = ref<any>({})
 const isSubmitted = ref(false)
 const showQuizModal = ref(false)
 const showChapterSelector = ref(false)
+
+const chatInputRef = ref<any>(null)
+const quizInputRef = ref<any>(null)
 
 const selectedContext = ref<{type: string, id: number, label: string} | null>(null)
 
@@ -547,6 +552,10 @@ const handleNodeClick = (data: any) => {
           id: data.id,
           label: data.value
       }
+      // 将焦点返回到输入框
+      nextTick(() => {
+          chatInputRef.value?.focus()
+      })
   } else {
       quizPrompt.value = quizPrompt.value.replace(/([#＃])$/, tag)
       // 保存上下文信息
@@ -555,6 +564,10 @@ const handleNodeClick = (data: any) => {
           id: data.id,
           label: data.value
       }
+      // 将焦点返回到输入框
+      nextTick(() => {
+          quizInputRef.value?.focus()
+      })
   }
   showChapterSelector.value = false
 }
@@ -956,6 +969,10 @@ const handleGenerateQuiz = async () => {
           isCompleted: false,
           userAnswers: null
        })
+       
+       // 清空输入框
+       quizPrompt.value = ''
+       quizContext.value = null
        
        // 滚动到底部
        scrollToBottom()

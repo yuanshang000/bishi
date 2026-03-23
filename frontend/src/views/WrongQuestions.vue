@@ -566,7 +566,7 @@ const handleCreateReviewQuiz = async () => {
 
 // Helpers
 const getQuestionTypeLabel = (type: string) => {
-  const map: any = { choice: '选择题', blank: '填空题', translation: '翻译', listening: '听力', reading: '阅读', writing: '写作' }
+  const map: any = { choice: '选择题', blank: '填空题', translation: '翻译', reading: '阅读', writing: '写作' }
   return map[type] || type
 }
 
