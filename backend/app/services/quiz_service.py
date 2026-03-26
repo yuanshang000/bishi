@@ -745,7 +745,7 @@ class QuizService:
         Args:
             user_answer: 用户答案
             correct_answer: 正确答案
-            quiz_type: 题目类型 (listening/reading/translation/writing)
+            quiz_type: 题目类型 (reading/translation/writing)
             question: 题目内容（用于语义评分）
 
         Returns:
@@ -757,7 +757,7 @@ class QuizService:
         # 1. 确定真实题目类型 (处理综合题/随机题的情况)
         real_quiz_type = quiz_type
         # 定义客观题类型列表
-        objective_types = ["listening", "reading", "choice", "vocabulary", "blank", "matching", "ordering"]
+        objective_types = ["reading", "choice", "vocabulary", "blank", "matching", "ordering"]
         
         if extra_info:
             # 如果 extra_info 中明确指定了 quiz_type，直接使用
@@ -766,9 +766,7 @@ class QuizService:
             # 否则尝试根据 extra_info 的字段特征推断
             elif not any(t in quiz_type for t in objective_types + ["translation", "writing"]):
                 if extra_info.get('options') or extra_info.get('items') or extra_info.get('pairs'):
-                    if extra_info.get('audio_text') or extra_info.get('audio_url'):
-                        real_quiz_type = "listening"
-                    elif extra_info.get('passage'):
+                    if extra_info.get('passage'):
                         real_quiz_type = "reading"
                     elif extra_info.get('pairs'):
                         real_quiz_type = "matching"
@@ -781,8 +779,8 @@ class QuizService:
                 elif extra_info.get('topic') or extra_info.get('word_count'):
                     real_quiz_type = "writing"
                     
-        # 判断是否为客观题（听力、阅读、选择、词汇、填空等）
-        # 支持带后缀的类型，如 "listening:easy"
+        # 判断是否为客观题（阅读、选择、词汇、填空等）
+        # 支持带后缀的类型，如 "reading:easy"
         is_objective = False
         for t in objective_types:
             if real_quiz_type == t or real_quiz_type.startswith(t + ":"):
@@ -795,7 +793,7 @@ class QuizService:
                 logger.info(f"Using direct LLM check for {real_quiz_type}...")
                 if user_answer and str(user_answer).strip():
                     # Determine score type based on quiz type and extra info
-                    score_type = "listening_check"
+                    score_type = "short_answer"
                     
                     # Normalize types for checking
                     q_type_str = str(real_quiz_type).lower()
@@ -827,7 +825,7 @@ class QuizService:
                              score_type = "grammar"
                          # Even if target_item is a single word, if it's a choice question, it might be a grammar question about that word's usage
                          # If we haven't decided on "word" type yet, lean towards "grammar" for detailed feedback if it's a choice question
-                         elif score_type == "listening_check":
+                         elif score_type == "short_answer":
                              # Check if it is likely a vocabulary question
                              # If target_item is present and is a single word, default to 'word' type
                              if target_item_str and " " not in target_item_str and len(target_item_str) < 20:
@@ -881,9 +879,22 @@ class QuizService:
                         question=final_question,
                         score_type=score_type
                     )
-                    is_correct = result.get('is_correct', False)
+
+                    # 处理返回结果：支持两种格式
+                    # 格式1: {"is_correct": true, "feedback": "..."} (grammar, word, listening_check)
+                    # 格式2: {"score": 0.75, "feedback": "..."} (translation, short_answer, writing)
+                    if 'is_correct' in result:
+                        # 格式1：直接使用 is_correct
+                        is_correct = result.get('is_correct', False)
+                        score = 1.0 if is_correct else 0.0
+                    else:
+                        # 格式2：根据 score 判断
+                        score = result.get('score', 0.0)
+                        # score >= 0.6 视为正确
+                        is_correct = score >= 0.6
+
                     feedback = result.get('feedback', "回答正确！" if is_correct else f"回答错误。正确答案是 {correct_answer}")
-                    return is_correct, 1.0 if is_correct else 0.0, feedback
+                    return is_correct, score, feedback
             except Exception as e:
                 logger.error(f"Direct LLM check failed: {e}")
                 # Fallback to simple comparison if AI fails

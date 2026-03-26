@@ -1,7 +1,12 @@
 """
 AI 学情分析服务
 
-集成 MCP Server 提供的学生数据，进行智能分析
+通过 Tool Calling 方式调用数据访问层，获取学生学情数据进行智能分析
+
+【架构说明】
+- 数据访问层（data_access）提供原始数据查询功能
+- 本服务负责业务逻辑和深度分析
+- 采用 Tool Calling 模式，直接调用数据查询函数
 """
 
 import sys
@@ -21,12 +26,13 @@ from app.models.user_knowledge_stats import UserKnowledgePointStats
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func
 
-# 添加 mcp_server 到 Python 路径
-mcp_server_path = os.path.join(os.path.dirname(__file__), '../../mcp_server')
-if mcp_server_path not in sys.path:
-    sys.path.insert(0, mcp_server_path)
+# 添加数据访问层到 Python 路径
+data_access_path = os.path.join(os.path.dirname(__file__), '../../data_access')
+if data_access_path not in sys.path:
+    sys.path.insert(0, data_access_path)
 
-from server import fetch_learning_data, fetch_wrong_questions, fetch_weak_knowledge_points
+# 导入数据查询函数（Tool Calling）
+from queries import fetch_learning_data, fetch_wrong_questions, fetch_weak_knowledge_points
 
 logger = logging.getLogger(__name__)
 
@@ -155,11 +161,12 @@ class AIAnalysisService:
             Dict: 包含练习记录的字典
         """
         try:
+            # Tool Calling: 直接调用数据查询函数
             result = await fetch_learning_data({
                 "student_id": student_id,
                 "limit": limit
             })
-            return json.loads(result[0].text)
+            return result  # 直接返回字典，不再需要解析 TextContent
         except Exception as e:
             logger.error(f"Failed to fetch learning data: {e}")
             return {"total_records": 0, "records": []}
@@ -176,11 +183,12 @@ class AIAnalysisService:
             Dict: 包含薄弱知识点的字典
         """
         try:
+            # Tool Calling: 直接调用数据查询函数
             result = await fetch_weak_knowledge_points({
                 "student_id": student_id,
                 "top_k": top_k
             })
-            return json.loads(result[0].text)
+            return result  # 直接返回字典，不再需要解析 TextContent
         except Exception as e:
             logger.error(f"Failed to fetch weak points: {e}")
             return {"total_weak_points": 0, "weak_knowledge_points": []}
@@ -198,12 +206,13 @@ class AIAnalysisService:
             Dict: 包含错题记录的字典
         """
         try:
+            # Tool Calling: 直接调用数据查询函数
             result = await fetch_wrong_questions({
                 "student_id": student_id,
                 "limit": limit,
                 "is_mastered": is_mastered
             })
-            return json.loads(result[0].text)
+            return result  # 直接返回字典，不再需要解析 TextContent
         except Exception as e:
             logger.error(f"Failed to fetch wrong questions: {e}")
             return {"total_wrong_questions": 0, "wrong_questions": []}
@@ -893,7 +902,6 @@ class AIAnalysisService:
         logger.info(f"  - Chapter stats: {len(chapter_stats)} chapters")
 
         quiz_type_names = {
-            "listening": "听力理解",
             "reading": "阅读理解",
             "translation": "翻译练习",
             "writing": "写作练习"
@@ -1011,7 +1019,6 @@ class AIAnalysisService:
 
         # 题型名称映射
         quiz_type_names = {
-            "listening": "听力理解",
             "reading": "阅读理解",
             "translation": "翻译练习",
             "writing": "写作练习"

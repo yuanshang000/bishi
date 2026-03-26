@@ -384,32 +384,29 @@ class LLMService:
             requirements: 出题要求列表
 
         Returns:
-            Dict: 分类结果，key为类别(listening/reading/translation/writing/vocabulary)，value为该类别下的要求列表
+            Dict: 分类结果，key为类别(reading/translation/writing/vocabulary)，value为该类别下的要求列表
         """
         if not requirements:
             return {}
 
         prompt = f"""
 你是一个专业的英语教学辅助AI。
-请将以下英语教学出题要求（题型）分类为以下5大类之一：
-1. listening (听力理解)
-2. reading (阅读理解)
-3. translation (翻译能力)
-4. writing (写作能力)
-5. vocabulary (词汇语法)
+请将以下英语教学出题要求（题型）分类为以下4大类之一：
+1. reading (阅读理解)
+2. translation (翻译能力)
+3. writing (写作能力)
+4. vocabulary (词汇语法)
 
 待分类的出题要求：{json.dumps(requirements, ensure_ascii=False)}
 
 **分类原则：**
-- **listening**: 涉及听音、复述、听写、对话、情景反应等。
 - **reading**: 涉及阅读文章、理解文意、快速阅读等。
 - **translation**: 涉及中译英、英译中、句子翻译等。
 - **writing**: 涉及写作、作文、应用文、改写等。
-- **vocabulary**: 涉及单词拼写、词汇搭配、语法选择、改错、填空（非听力填空）等。如果某个要求既像阅读又像词汇（如完形填空），优先归为reading；如果是纯词汇语法题，归为vocabulary。
+- **vocabulary**: 涉及单词拼写、词汇搭配、语法选择、改错、填空等。如果某个要求既像阅读又像词汇（如完形填空），优先归为reading；如果是纯词汇语法题，归为vocabulary。
 
 **返回格式（严格JSON）：**
 {{
-  "listening": ["要求A", "要求B"],
   "reading": ["要求C"],
   "translation": [],
   "writing": [],
@@ -475,13 +472,7 @@ class LLMService:
                 # 规范化题目类型
                 q_type = q.get('quiz_type', quiz_type)
                 # 映射到前端支持的类型: choice, blank, translation, writing
-                if q_type == 'listening':
-                    # 如果是听力选择题，转为 choice，并保留 audio_text
-                    if q.get('options') and isinstance(q.get('options'), (dict, list)):
-                         q['type'] = 'choice' # Frontend uses 'type' or 'quiz_type'
-                    else:
-                         q['type'] = 'blank'
-                elif q_type in ['choice', 'vocabulary', 'reading']:
+                if q_type in ['choice', 'vocabulary', 'reading']:
                     q['type'] = 'choice'
                 elif q_type in ['blank', 'ordering']:
                     q['type'] = 'blank'
@@ -579,21 +570,6 @@ class LLMService:
     "question": "请翻译：The meeting was cancelled.",
     "quiz_type": "translation",
     "correct_answer": "会议被取消了。",
-    "explanation": "解析..."
-  }
-]""",
-            "listening": """
-**题型：听力理解 (Listening)**
-- 必须包含 `audio_text` 字段（用于生成语音）。
-- 可以是选择题形式。
-- 格式示例：
-[
-  {
-    "question": "Listen and choose the correct answer.",
-    "quiz_type": "listening",
-    "audio_text": "This is the audio content...",
-    "options": {"A": "...", "B": "...", "C": "...", "D": "..."},
-    "correct_answer": "A",
     "explanation": "解析..."
   }
 ]""",
@@ -875,24 +851,18 @@ class LLMService:
                 count=count
             )
 
-        # 处理复合题型 (例如 "listening:News Listening")
+        # 处理复合题型 (例如 "reading:News Reading")
         real_quiz_type = quiz_type
         specific_instruction = ""
         if ":" in quiz_type:
             real_quiz_type, specific_instruction = quiz_type.split(":", 1)
-
-        # 针对简单听力题，增加生成数量以确保去重后仍有足够题目
-        request_count = count
-        if real_quiz_type == "listening" and difficulty == "easy":
-            request_count = max(count + 3, 5)  # 至少多生成3个，且不少于5个
-            logger.info(f"Generating {request_count} listening questions (easy) to filter duplicates for target {count}")
 
         # 构建已有题目的提示（避免重复）
         existing_prompt = ""
         if existing_questions:
             existing_titles = []
             for q in existing_questions:
-                if real_quiz_type in ["listening", "reading"]:
+                if real_quiz_type == "reading":
                     existing_titles.append(q.get('question', '')[:50])
                 elif real_quiz_type == "translation":
                     existing_titles.append(q.get('question', '')[:50])
@@ -1026,82 +996,6 @@ class LLMService:
 ]
 
 **注意**：你可以返回 "quiz_type": "blank" 的题目，前端会正确渲染为填空题。
-
-请确保返回完整的JSON数组，包含{request_count}道题。只返回JSON，不要其他文字。""",
-
-            "listening": f"""你是一位专业的英语教师。
-{diff_instruction}
-
-**第0步：检查特别指令（优先级最高）**
-- 检查文档中是否有【特别指令 (High Priority)】或【出题要求】。
-- 如果有指定重点、句型或限制条件，**必须**在题目中体现。
-
-**第一步：识别文档核心内容**
-仔细阅读文档，找出文档**标题**和**核心词汇/短语**。
-
-**文档：**
-{context}
-{existing_prompt}
-
-**第二步：根据难度生成听力题（Listen and Select / Dictation）**
-请根据当前的难度等级（Easy/Intermediate/Hard）严格遵守以下规则：
-
-**混合出题策略：**
-为了全面检测（Mastery Check），请混合生成以下两种类型的题目：
-1. **听音选义/词** (Listening Choice): 播放单词/句子，选出对应的单词或中文意思。
-2. **听写/默写** (Dictation/Blank): 播放单词/句子，学生需要填写听到的单词（考察拼写）。
-
-1. **录音内容 (audio_text) 要求**：
-   - **简单 (Easy)**: 仅包含 **1个** 核心单词（必须来自文档）。
-   - **中等 (Intermediate)**: 包含 **1-3个** 学习词语组成的 **1-2个** 句子。
-   - **困难 (Hard)**: 包含 **至少5个** 学习词语组成的 **3-5个** 句子。
-
-2. **题目类型与选项 (options) 要求**：
-   - **Type A: 选择题 (Choice)**:
-     - 题目类型：**多项选择**
-     - 选项格式：**列表** `['word1', ...]`
-     - 正确答案：**单词列表**。
-   
-   - **Type B: 填空/默写题 (Blank)**:
-     - 题目类型：**填空题** ("quiz_type": "blank")
-     - 题目内容： "Listen and write the word you hear."
-     - 正确答案：**字符串** (e.g., "apple")。
-     - **注意**：必须提供 `audio_text` 字段，前端会生成音频。
-
-3. **录音生成要求**:
-   - 录音内容必须准确发音，单词拼写无误。
-
-**第三步：出{request_count}道听力题**
-
-**绝对强制要求：**
-1. **优先遵循文档中的【特别指令】**
-2. **对于同一个核心词，尽量生成一题听音选择，一题听音默写，以达到全方位检测的目的。**
-3. **每道题必须明确标注 target_item（考察的核心知识点/词汇/短语）**
-
-**返回格式（JSON数组）：**
-
-**简单难度示例 (Easy):**
-[
-  {{
-    "question": "请听录音，选出你听到的单词（多选）。",
-    "quiz_type": "listening",
-    "target_item": "apple",
-    "audio_text": "apple",
-    "options": ["apple", "apply", "ample", "appeal"], 
-    "correct_answer": ["apple"],
-    "explanation": "解析：录音中读的是 'apple'。"
-  }},
-  {{
-    "question": "Listen and write the word you hear (Dictation).",
-    "quiz_type": "blank",
-    "target_item": "apple",
-    "audio_text": "apple",
-    "correct_answer": "apple",
-    "explanation": "解析：单词拼写为 a-p-p-l-e。"
-  }}
-]
-
-**注意**：你可以返回 "quiz_type": "blank" 的题目，前端会正确渲染为填空题。如果带有 audio_text，前端会显示播放器。
 
 请确保返回完整的JSON数组，包含{request_count}道题。只返回JSON，不要其他文字。""",
 
@@ -1392,7 +1286,7 @@ class LLMService:
 请确保返回完整的JSON数组，包含{request_count}道题。只返回JSON，不要其他文字。"""
         }
 
-        prompt = prompts.get(real_quiz_type, prompts.get("listening", ""))
+        prompt = prompts.get(real_quiz_type, prompts.get("choice", ""))
 
         rules = self._get_question_rules() or ""
         system_content = "你是一个专业的英语教师，擅长根据教学文档内容出题。你必须严格按照要求的JSON格式返回结果，不要添加任何额外的说明文字或markdown标记。确保返回完整的JSON数组。"
@@ -1610,10 +1504,7 @@ class LLMService:
             # 处理复合题型 (例如 "listening:News Listening")
             real_quiz_type = quiz_type.split(":")[0] if ":" in quiz_type else quiz_type
             
-            if real_quiz_type == "listening":
-                # 听力题: Listen and Select Mode
-                required_fields = ['question', 'audio_text', 'options', 'correct_answer']
-            elif real_quiz_type == "reading":
+            if real_quiz_type == "reading":
                 required_fields = ['passage', 'question', 'options', 'correct_answer']
             elif real_quiz_type == "translation":
                 required_fields = ['question', 'correct_answer']
@@ -1644,39 +1535,8 @@ class LLMService:
             if 'options' in required_fields:
                 options = question.get('options')
                 
-                if real_quiz_type == 'listening':
-                    # 听力题选项可以是列表（多选）或字典（单选）
-                    if not isinstance(options, (list, dict)):
-                        # 尝试修复字符串形式的列表 (e.g. "['a', 'b']")
-                        repaired = False
-                        if isinstance(options, str):
-                            try:
-                                # 简单的替换单引号为双引号（不严谨但对简单列表有效）
-                                import json
-                                # 尝试直接解析
-                                try:
-                                    parsed = json.loads(options)
-                                except:
-                                    # 尝试替换单引号
-                                    parsed = json.loads(options.replace("'", '"'))
-                                
-                                if isinstance(parsed, (list, dict)):
-                                    question['options'] = parsed
-                                    options = parsed
-                                    repaired = True
-                                    logger.info(f"Repaired stringified options: {options}")
-                            except Exception:
-                                pass
-                        
-                        if not repaired:
-                            logger.warning(f"Listening options must be a list or dict, got: {type(options)}")
-                            return False
-                            
-                    if len(options) < 2:
-                        logger.warning(f"Options must have at least 2 choices, got: {len(options)}")
-                        return False
-                else:
-                    # 其他题型选项为字典
+                # 选项为字典
+                if not isinstance(options, dict):
                     if not isinstance(options, dict):
                         logger.warning(f"Options must be a dict, got: {type(options)}")
                         return False
@@ -1823,8 +1683,6 @@ class LLMService:
         """提取题目的关键文本用于比较"""
         if 'passage' in question:  # 阅读题
             return question.get('passage', '')[:200]
-        elif 'audio_text' in question:  # 听力题
-            return question.get('audio_text', '')[:200]
         elif 'topic' in question:  # 写作题
             return question.get('topic', '')
         else:  # 翻译题等
@@ -2027,7 +1885,7 @@ class LLMService:
             user_answer: 用户答案
             correct_answer: 参考答案
             question: 题目内容
-            score_type: 评分类型（translation/short_answer/listening_check）
+            score_type: 评分类型（translation/short_answer）
             
         Returns:
             Dict: {
@@ -2072,30 +1930,6 @@ class LLMService:
 }}
 仅返回JSON。""",
 
-            "listening_check": f"""你是一位严格但公正的英语阅卷老师。请判断学生的选择题/听力题答案是否正确。
-            
-题目内容：{question}
-标准答案：{correct_answer}
-学生答案：{user_answer}
-
-判断标准：
-1. **语义一致性**：如果答案是单词列表（如听力多选），顺序不同但包含的单词完全一致（忽略大小写、标点），则视为正确。
-2. **格式宽容度**：如果学生提交的是JSON字符串而标准答案是列表（或反之），只要内容本质相同，视为正确。
-3. **同义替换**：对于选择题，通常不接受同义词，必须严格匹配选项内容。但如果是听写题，可以接受拼写完全正确的同义词（视具体情况）。
-4. **当前任务**：你正在判断的是【听力/阅读理解】的选择题或填空题。
-
-请务必仔细对比。例如：
-- 标准答案 ["A", "B"]，学生答案 ["B", "A"] -> 正确
-- 标准答案 ["apple", "banana"]，学生答案 ["banana", "apple"] -> 正确
-- 标准答案 "apple"，学生答案 "the apple" -> 如果核心词对，通常算对（视具体语境），但选择题通常要求精确。
-
-请以JSON格式返回结果：
-{{
-  "is_correct": true,
-  "feedback": "答案完全正确，只是顺序不同。"
-}}
-仅返回JSON。
-""",
             "word": f"""你是一位严格的英语词汇评分助手。
 题目内容：{question}
 正确答案：{correct_answer}
@@ -2348,7 +2182,7 @@ class LLMService:
 请提取5-10个关键知识点，每个知识点包含：
 - id: 唯一标识（如"kp_grammar_past_perfect"）
 - name: 知识点名称
-- category: 分类（grammar/vocabulary/reading/writing/listening/speaking）
+- category: 分类（grammar/vocabulary/reading/writing/speaking）
 - description: 简要描述（50字以内）
 - examples: 示例列表（可选，2-3个示例）
 
@@ -2478,7 +2312,7 @@ class LLMService:
             "questions": []
         }}
 }}
-注意：quiz_type 必须是前端支持的类型: choice, blank, translation, reading, writing, listening, vocabulary.
+注意：quiz_type 必须是前端支持的类型: choice, blank, translation, reading, writing, vocabulary.
 如果是听音默写，请设置 quiz_type="blank", audio_required=true, 并在 audio_text 字段中放入要朗读的单词。
 options字段如果是选择题，请返回字典格式 {{"A": "...", "B": "..."}}。
 """

@@ -13,7 +13,6 @@ from app.api.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.services.ai_analysis_service import ai_analysis_service
 from app.services.quiz_service import quiz_service
-from app.services.tts_service import tts_service
 
 logger = logging.getLogger(__name__)
 
@@ -217,11 +216,9 @@ async def create_comprehensive_quiz(
 
             # 题型映射
             type_map = {
-                '听力理解': 'listening',
                 '阅读理解': 'reading',
                 '翻译练习': 'translation',
                 '写作练习': 'writing',
-                'listening': 'listening',
                 'reading': 'reading',
                 'translation': 'translation',
                 'writing': 'writing'
@@ -282,38 +279,6 @@ async def create_comprehensive_quiz(
                     count=count,
                     difficulty="intermediate"
                 )
-
-                # 🔥 如果是听力题，立即转换为音频
-                if quiz_type == "listening":
-                    logger.info(f"Converting {len(questions)} listening questions to audio...")
-                    for i, q in enumerate(questions):
-                        # 详细日志：检查题目结构
-                        logger.info(f"Listening question {i+1} keys: {list(q.keys())}")
-
-                        if 'audio_text' in q:
-                            audio_text = q['audio_text']
-                            logger.info(f"Listening question {i+1}: audio_text length = {len(audio_text)} chars")
-                            logger.debug(f"Listening question {i+1}: audio_text = {audio_text[:200]}...")
-
-                            try:
-                                # 将audio_text转换为音频
-                                logger.info(f"Calling TTS service for question {i+1}...")
-                                audio_url = await tts_service.text_to_speech(audio_text)
-                                q['audio_url'] = audio_url
-
-                                # 将audio_text移到explanation中
-                                original_explanation = q.get('explanation', '')
-                                audio_text_note = f"\n\n**音频文本：**\n{audio_text}"
-                                q['explanation'] = original_explanation + audio_text_note
-
-                                logger.info(f"Listening question {i+1}: Audio generated successfully - {audio_url}")
-                            except Exception as e:
-                                logger.error(f"Error generating audio for listening question {i+1}: {e}", exc_info=True)
-                                q['audio_url'] = None
-                        else:
-                            logger.warning(f"Listening question {i+1}: Missing 'audio_text' field! Question keys: {list(q.keys())}")
-                            q['audio_url'] = None
-                    logger.info(f"Audio conversion completed for listening questions")
 
                 # 为每个题目添加quiz_type字段
                 for q in questions:

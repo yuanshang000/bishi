@@ -97,7 +97,7 @@ class ComprehensiveQuizService:
 请根据用户的要求和提供的知识内容生成一道题目。
 必须返回符合以下JSON格式的数据（不要包含Markdown代码块标记）：
 {
-    "quiz_type": "题型(translation/writing/reading/choice/listening)",
+    "quiz_type": "题型(translation/writing/reading/choice)",
     "question_text": "题目具体问题（例如：What is the main idea?）",
     "options": {"A": "选项A内容", "B": "选项B内容", "C": "...", "D": "..."} (如果是选择题或阅读理解题),
     "passage": "文章内容" (如果是阅读理解题),

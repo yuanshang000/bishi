@@ -386,7 +386,7 @@ async def create_quiz(
 
     - **practice_mode**: 练习方式 (chapter=章节练习, random=随机练习, comprehensive=综合练习)
     - **chapter_id**: 章节ID（章节练习时必填）
-    - **quiz_type**: 练习类型 (listening/reading/translation/writing等)
+    - **quiz_type**: 练习类型 (reading/translation/writing等)
     - **question_count**: 题目数量（1-20，默认5）
     """
     quiz_record = await quiz_service.create_quiz(
