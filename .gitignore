@@ -1,0 +1,62 @@
+# ===== 操作系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.venv
+
+# ===== 环境变量 / 密钥 =====
+.env
+.env.local
+.env.*.local
+*.local
+
+# ===== 运行时产物 =====
+backend/logs/
+backend/static/
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/data/chroma/*
+!backend/data/chroma/.gitkeep
+*.log
+
+# ===== 前端 =====
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# ===== 临时文件 =====
+*.tmp
+temp/
+tmp/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/

@@ -18,7 +18,7 @@ class DataAccessSettings(BaseSettings):
     """
 
     # 数据库配置
-    DATABASE_URL: str = "mysql+pymysql://root:123456@localhost:3306/college_english_assistant"
+    DATABASE_URL: str = "mysql+pymysql://root:your_password@localhost:3306/college_english_assistant"
 
     # 日志配置
     LOG_LEVEL: str = "INFO"
